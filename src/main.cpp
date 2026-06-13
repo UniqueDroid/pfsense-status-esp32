@@ -10,6 +10,9 @@
 #include "config_portal.h"
 #include "pfsense_api.h"
 #include "dashboard.h"
+#if defined(USE_LVGL_PROTOTYPE)
+#include "lvgl_prototype.h"
+#endif
 
 // Global constants
 const char *kPrefsNs = "fwstatus";
@@ -215,6 +218,10 @@ void setup() {
 
   tft.init();
   tft.setRotation(DASHBOARD_ROTATION);
+#if defined(USE_LVGL_PROTOTYPE)
+  initLvglPrototype();
+  return;
+#endif
   setupButtons();
   tft.fillScreen(TFT_BLACK);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
@@ -258,6 +265,11 @@ void setup() {
 }
 
 void loop() {
+#if defined(USE_LVGL_PROTOTYPE)
+  loopLvglPrototype();
+  return;
+#endif
+
   static uint32_t lastWifiRetry = 0;
   static uint32_t lastRenderMs = 0;
   static bool wasWifiConnected = false;
