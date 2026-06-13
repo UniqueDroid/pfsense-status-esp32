@@ -220,6 +220,8 @@ void setup() {
   tft.setRotation(DASHBOARD_ROTATION);
 #if defined(USE_LVGL_PROTOTYPE)
   initLvglPrototype();
+  configureWiFi();
+  wm.startWebPortal();
   return;
 #endif
   setupButtons();
