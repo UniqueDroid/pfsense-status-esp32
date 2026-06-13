@@ -232,7 +232,10 @@ void drawDashboardOn(DisplayT &display) {
   display.fillRect(0, footerY, screenW, footerH, tft.color565(24, 24, 24));
   display.setTextColor(TFT_LIGHTGREY, tft.color565(24, 24, 24));
   display.setTextFont(1);
-  display.drawString("Host:" + String(pfSenseHost) + " | IP:" + WiFi.localIP().toString() + " | Uptime:" + lastUpdate, 6, footerY + 5);
+  // First line: Host and IP
+  display.drawString("H:" + String(pfSenseHost) + "  I:" + WiFi.localIP().toString(), 6, footerY + 1);
+  // Second line: Uptime
+  display.drawString("Up:" + lastUpdate, 6, footerY + 9);
 #endif
 }
 

@@ -2,7 +2,7 @@
 #define LV_CONF_H
 
 /*
- * Minimal LVGL config for prototype branch.
+ * Minimal LVGL config for dashboard build.
  * All non-defined options fall back to LVGL defaults.
  */
 

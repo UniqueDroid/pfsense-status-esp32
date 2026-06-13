@@ -10,8 +10,8 @@
 #include "config_portal.h"
 #include "pfsense_api.h"
 #include "dashboard.h"
-#if defined(USE_LVGL_PROTOTYPE)
-#include "lvgl_prototype.h"
+#if defined(USE_LVGL_DASHBOARD)
+#include "lvgl_dashboard.h"
 #endif
 
 // Global constants
@@ -218,8 +218,8 @@ void setup() {
 
   tft.init();
   tft.setRotation(DASHBOARD_ROTATION);
-#if defined(USE_LVGL_PROTOTYPE)
-  initLvglPrototype();
+#if defined(USE_LVGL_DASHBOARD)
+  initLvglDashboard();
   configureWiFi();
   wm.startWebPortal();
   return;
@@ -267,8 +267,8 @@ void setup() {
 }
 
 void loop() {
-#if defined(USE_LVGL_PROTOTYPE)
-  loopLvglPrototype();
+#if defined(USE_LVGL_DASHBOARD)
+  loopLvglDashboard();
   return;
 #endif
 
