@@ -5,6 +5,8 @@
 
 #include "config_portal.h"
 #include "config_manager.h"
+#include "firmware_update.h"
+#include "firmware_version.h"
 #include "globals.h"
 
 #ifndef FW_BOOT_DEBUG
@@ -162,7 +164,11 @@ String sanitizeMenuPassword(const char *raw) {
 
 String buildCustomStatusHtml(bool firstRun) {
   if (firstRun) {
-    return String("<div class='msg'><strong>Firewall Host:</strong> not configured</div>");
+    String html = "<div class='msg'><strong>Firewall Host:</strong> not configured</div>";
+    html += "<div class='msg'><strong>Firmware:</strong> ";
+    html += String(kFirmwareVersion);
+    html += "</div>";
+    return html;
   }
 
   String fwColor = bootApiReachableState ? "#5cb85c" : "#FF8B8B";
@@ -170,6 +176,9 @@ String buildCustomStatusHtml(bool firstRun) {
   html += fwColor;
   html += "'><strong>Firewall Host:</strong> ";
   html += String(pfSenseHost);
+  html += "</div>";
+  html += "<div class='msg'><strong>Firmware:</strong> ";
+  html += String(kFirmwareVersion);
   html += "</div>";
   return html;
 }
@@ -184,8 +193,101 @@ String buildCustomMenuHtml(bool firstRun) {
   String html;
   html += "<form style='margin:0 0 10px 0' action='/factory-erase' method='post' onsubmit=\"return confirm('Erase all saved config and reboot?');\">";
   html += "<button style='background:#b00020;color:#fff'>Config Erase</button></form>";
+  html += "<form style='margin:0 0 10px 0' action='/firmware-update' method='get'><button>Firmware Update</button></form>";
   html += "<form style='margin:0 0 12px 0' action='/logout' method='get'><button>Logout</button></form>";
-  html += "<div style='height:8px'></div>";
+  return html;
+}
+
+String escapeHtml(String text) {
+  text.replace("&", "&amp;");
+  text.replace("<", "&lt;");
+  text.replace(">", "&gt;");
+  text.replace("\"", "&quot;");
+  text.replace("'", "&#39;");
+  return text;
+}
+
+String formatReleaseBody(String body) {
+  body.replace("\r", "");
+  body.replace("\n", "<br/>");
+  if (body.length() > 900) {
+    body = body.substring(0, 900) + "<br/>...";
+  }
+  return body;
+}
+
+String buildFirmwareUpdatePage(const FirmwareReleaseInfo &info, const String &message = String(), bool success = false) {
+  String html;
+  html.reserve(7000);
+  html += "<!DOCTYPE html><html lang='en'><head>";
+  html += "<meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1,user-scalable=no'/>";
+  html += "<title>Firmware Update</title>";
+  html += "<style>";
+  html += ".c,body{text-align:center;font-family:verdana}div,input,select{padding:5px;font-size:1em;margin:5px 0;box-sizing:border-box}";
+  html += "input,button,select,.msg{border-radius:.3rem;width:100%}button{cursor:pointer;border:0;background-color:#1fa3ec;color:#fff;line-height:2.4rem;font-size:1.2rem;width:100%}";
+  html += "button.D{background-color:#dc3630}.wrap{text-align:left;display:inline-block;min-width:260px;max-width:500px}";
+  html += "a{color:#000;font-weight:700;text-decoration:none}a:hover{color:#1fa3ec;text-decoration:underline}";
+  html += ".msg{padding:20px;margin:20px 0;border:1px solid #eee;border-left-width:5px;border-left-color:#777}";
+  html += ".msg.S{border-left-color:#5cb85c}.msg.D{border-left-color:#dc3630}.msg.P{border-left-color:#1fa3ec}";
+  html += "dt{font-weight:bold}dd{margin:0;padding:0 0 .5em 0;min-height:12px}";
+  html += "</style></head><body><div class='wrap'>";
+  html += "<h1>pfSense Firewall Status</h1><h3>Firmware Update</h3>";
+
+  if (message.length() > 0) {
+    html += "<div class='msg ";
+    html += success ? "S'" : "D'";
+    html += "><strong>";
+    html += success ? "Status" : "Notice";
+    html += "</strong><br/>";
+    html += escapeHtml(message);
+    html += "</div>";
+  }
+
+  html += "<div class='msg P'><strong>Current firmware:</strong> ";
+  html += escapeHtml(kFirmwareVersion);
+  html += "</div>";
+
+  html += "<h3>Release Information</h3><hr><dl>";
+  html += "<dt>Current</dt><dd>";
+  html += escapeHtml(info.currentVersion);
+  html += "</dd>";
+  html += "<dt>Latest</dt><dd>";
+  html += escapeHtml(info.latestVersion.length() ? info.latestVersion : String("unknown"));
+  html += "</dd>";
+  html += "<dt>Release</dt><dd>";
+  html += escapeHtml(info.releaseName.length() ? info.releaseName : String("-"));
+  html += "</dd>";
+  html += "<dt>Asset</dt><dd>";
+  html += escapeHtml(info.assetName.length() ? info.assetName : String("-"));
+  html += "</dd>";
+  html += "<dt>Published</dt><dd>";
+  html += escapeHtml(info.publishedAt.length() ? info.publishedAt : String("-"));
+  html += "</dd></dl>";
+
+  html += "<div class='msg ";
+  html += info.updateAvailable ? "P'" : "S'";
+  html += "><strong>";
+  html += info.updateAvailable ? "Update available" : "Already on the latest GitHub release";
+  html += "</strong></div>";
+
+  if (info.releaseBody.length() > 0) {
+    html += "<div class='msg'><strong>Release Notes</strong><br/>";
+    html += formatReleaseBody(escapeHtml(info.releaseBody));
+    html += "</div>";
+  }
+
+  html += "<form action='";
+  html += kFirmwareGitHubReleasesUrl;
+  html += "' method='get' target='_blank'><button type='submit'>Open GitHub Releases</button></form>";
+
+  if (WiFi.status() == WL_CONNECTED && info.assetUrl.length() > 0) {
+    html += "<form action='/firmware-update/install' method='post' onsubmit=\"return confirm('Download and install this release now?');\"><button class='D' type='submit'>Download & Flash Latest Release</button></form>";
+  } else if (WiFi.status() != WL_CONNECTED) {
+    html += "<div class='msg D'><strong>WiFi is not connected.</strong><br/>Firmware updates need network access.</div>";
+  }
+
+  html += "<hr><br/><form action='/' method='get'><button type='submit'>Back to Menu</button></form>";
+  html += "</div></body></html>";
   return html;
 }
 
@@ -426,6 +528,45 @@ void setupPortalRoutes() {
   };
 
   wm.server->on("/factory-erase", HTTP_POST, eraseAllAndReboot);
+
+  wm.server->on("/firmware-update", HTTP_GET, []() {
+    FirmwareReleaseInfo info;
+    String errorMessage;
+    bool ok = fetchLatestFirmwareRelease(info, errorMessage);
+    if (!ok) {
+      info.currentVersion = kFirmwareVersion;
+      info.latestVersion = "unavailable";
+        info.releaseName = "GitHub release unavailable";
+        info.releaseBody.clear();
+        info.releaseUrl = kFirmwareGitHubReleasesUrl;
+    }
+
+    wm.server->send(200, "text/html", buildFirmwareUpdatePage(info, ok ? String() : errorMessage, ok));
+  });
+
+  wm.server->on("/firmware-update/install", HTTP_POST, []() {
+    FirmwareReleaseInfo info;
+    String errorMessage;
+    if (!fetchLatestFirmwareRelease(info, errorMessage)) {
+      info.currentVersion = kFirmwareVersion;
+      info.latestVersion = "unavailable";
+        info.releaseName = "GitHub release unavailable";
+        info.releaseBody.clear();
+        info.releaseUrl = kFirmwareGitHubReleasesUrl;
+      wm.server->send(200, "text/html", buildFirmwareUpdatePage(info, errorMessage, false));
+      return;
+    }
+
+    if (!flashFirmwareAsset(info, errorMessage)) {
+      wm.server->send(200, "text/html", buildFirmwareUpdatePage(info, errorMessage, false));
+      return;
+    }
+
+    wm.server->send(200, "text/html", "<html><head><meta charset='utf-8'></head><body><h3>Firmware updated successfully. Rebooting now...</h3></body></html>");
+    wm.server->client().stop();
+    delay(1000);
+    ESP.restart();
+  });
 }
 
 void handleConfigSavedTransition() {
@@ -437,13 +578,16 @@ void handleConfigSavedTransition() {
 
 void configureWiFi() {
   const char *firstRunMenu[] = {"custom"};
-  const char *fullMenu[] = {"wifi", "param", "info", "custom", "restart", "sep", "update"};
+  const char *fullMenu[] = {"wifi", "param", "info", "custom", "restart", "sep"};
 
   wm.setSaveConfigCallback(saveConfigCallback);
   wm.setSaveParamsCallback(saveParamsCallback);
   wm.setConfigPortalBlocking(false);
-  wm.setTitle("pfSene Firewall Status");
+  wm.setTitle("pfSense Firewall Status");
   wm.setShowBack(true);
+  // Keep Info page clean: only informational content, no destructive quick actions.
+  wm.setShowInfoErase(false);
+  wm.setShowInfoUpdate(false);
 
   // Load current values from ConfigManager
   const DeviceConfig& cfg = ConfigManager::getInstance().getConfig();
@@ -466,7 +610,7 @@ void configureWiFi() {
   bootSequenceEnabled = isConfigured();
   BOOTLOG("[BOOT] isConfigured=%d host='%s' api_len=%u\n", bootSequenceEnabled ? 1 : 0, cfg.pfsense_host, (unsigned)strlen(cfg.api_key));
   wm.setParamsPage(false);
-  wm.setMenu(bootSequenceEnabled ? fullMenu : firstRunMenu, bootSequenceEnabled ? 7 : 1);
+  wm.setMenu(bootSequenceEnabled ? fullMenu : firstRunMenu, bootSequenceEnabled ? 6 : 1);
   applyPortalCustomHtml(!bootSequenceEnabled);
   if (bootSequenceEnabled && strlen(cfg.web_menu_password) >= 8) {
     wm.setHttpAuth("admin", cfg.web_menu_password);

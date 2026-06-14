@@ -365,7 +365,14 @@ void fetchSystemStatus() {
         String lower = temp;
         lower.toLowerCase();
         if (lower.indexOf("c") < 0 && lower.indexOf("f") < 0) {
-          temp += "C";
+          temp += "°C";
+        } else if (lower.indexOf("°") < 0) {
+          if (temp.endsWith(" C") || temp.endsWith(" c")) {
+            temp.remove(temp.length() - 2);
+          } else if (temp.endsWith("C") || temp.endsWith("c")) {
+            temp.remove(temp.length() - 1);
+          }
+          temp += "°C";
         }
         tempValue = temp;
         int parsedTempPercent = temperatureToPercent(tempValue);
