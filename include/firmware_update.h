@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Arduino.h>
+#include <functional>
 
 struct FirmwareReleaseInfo {
   String currentVersion;
@@ -15,5 +16,7 @@ struct FirmwareReleaseInfo {
   bool updateAvailable = false;
 };
 
+using FirmwareProgressCallback = std::function<void(size_t writtenBytes, size_t totalBytes)>;
+
 bool fetchLatestFirmwareRelease(FirmwareReleaseInfo &info, String &errorMessage);
-bool flashFirmwareAsset(const FirmwareReleaseInfo &info, String &errorMessage);
+bool flashFirmwareAsset(const FirmwareReleaseInfo &info, String &errorMessage, const FirmwareProgressCallback &progressCallback = nullptr);

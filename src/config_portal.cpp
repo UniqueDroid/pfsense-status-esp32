@@ -216,37 +216,29 @@ String formatReleaseBody(String body) {
   return body;
 }
 
-String buildFirmwareUpdatePage(const FirmwareReleaseInfo &info, const String &message = String(), bool success = false) {
-  String html;
-  html.reserve(7000);
-  html += "<!DOCTYPE html><html lang='en'><head>";
-  html += "<meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1,user-scalable=no'/>";
-  html += "<title>Firmware Update</title>";
-  html += "<style>";
-  html += ".c,body{text-align:center;font-family:verdana}div,input,select{padding:5px;font-size:1em;margin:5px 0;box-sizing:border-box}";
-  html += "input,button,select,.msg{border-radius:.3rem;width:100%}button{cursor:pointer;border:0;background-color:#1fa3ec;color:#fff;line-height:2.4rem;font-size:1.2rem;width:100%}";
-  html += "button.D{background-color:#dc3630}.wrap{text-align:left;display:inline-block;min-width:260px;max-width:500px}";
-  html += "a{color:#000;font-weight:700;text-decoration:none}a:hover{color:#1fa3ec;text-decoration:underline}";
-  html += ".msg{padding:20px;margin:20px 0;border:1px solid #eee;border-left-width:5px;border-left-color:#777}";
-  html += ".msg.S{border-left-color:#5cb85c}.msg.D{border-left-color:#dc3630}.msg.P{border-left-color:#1fa3ec}";
-  html += "dt{font-weight:bold}dd{margin:0;padding:0 0 .5em 0;min-height:12px}";
-  html += "</style></head><body><div class='wrap'>";
-  html += "<h1>pfSense Firewall Status</h1><h3>Firmware Update</h3>";
+String escapeJson(String text) {
+  text.replace("\\", "\\\\");
+  text.replace("\"", "\\\"");
+  text.replace("\n", "\\n");
+  text.replace("\r", "");
+  return text;
+}
 
-  if (message.length() > 0) {
-    html += "<div class='msg ";
-    html += success ? "S'" : "D'";
-    html += "><strong>";
-    html += success ? "Status" : "Notice";
-    html += "</strong><br/>";
-    html += escapeHtml(message);
-    html += "</div>";
-  }
+String buildFirmwareUpdateStyles() {
+  String css;
+  css.reserve(1800);
+  css += ".c,body{text-align:center;font-family:verdana}div,input,select{padding:5px;font-size:1em;margin:5px 0;box-sizing:border-box}";
+  css += "input,button,select,.msg{border-radius:.3rem;width:100%}button{cursor:pointer;border:0;background-color:#1fa3ec;color:#fff;line-height:2.4rem;font-size:1.2rem;width:100%}";
+  css += "button.D{background-color:#dc3630}.wrap{text-align:left;display:inline-block;min-width:260px;max-width:500px}";
+  css += "a{color:#000;font-weight:700;text-decoration:none}a:hover{color:#1fa3ec;text-decoration:underline}";
+  css += ".msg{padding:20px;margin:20px 0;border:1px solid #eee;border-left-width:5px;border-left-color:#777}";
+  css += ".msg.S{border-left-color:#5cb85c}.msg.D{border-left-color:#dc3630}.msg.P{border-left-color:#1fa3ec}";
+  css += "dt{font-weight:bold}dd{margin:0;padding:0 0 .5em 0;min-height:12px}";
+  css += ".progress-shell{margin:18px 0 14px 0}.progress-track{width:100%;height:14px;background:#dfe5ea;border-radius:999px;overflow:hidden;border:1px solid #c5d0d9}.progress-bar{height:100%;width:0%;background:linear-gradient(90deg,#1fa3ec,#5cb85c);border-radius:999px;transition:width .2s ease}.progress-shell.fail .progress-bar{background:#dc3630}.progress-text{font-size:.95em;color:#555;padding:0;margin:8px 0 0 0}";
+  return css;
+}
 
-  html += "<div class='msg P'><strong>Current firmware:</strong> ";
-  html += escapeHtml(kFirmwareVersion);
-  html += "</div>";
-
+void appendFirmwareReleaseInfo(String &html, const FirmwareReleaseInfo &info) {
   html += "<h3>Release Information</h3><hr><dl>";
   html += "<dt>Current</dt><dd>";
   html += escapeHtml(info.currentVersion);
@@ -263,6 +255,59 @@ String buildFirmwareUpdatePage(const FirmwareReleaseInfo &info, const String &me
   html += "<dt>Published</dt><dd>";
   html += escapeHtml(info.publishedAt.length() ? info.publishedAt : String("-"));
   html += "</dd></dl>";
+}
+
+String buildFirmwareInstallPageStart(const FirmwareReleaseInfo &info) {
+  String html;
+  html.reserve(7000);
+  html += "<!DOCTYPE html><html lang='en'><head>";
+  html += "<meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1,user-scalable=no'/>";
+  html += "<title>Firmware Update</title><style>";
+  html += buildFirmwareUpdateStyles();
+  html += "</style></head><body><div class='wrap'>";
+  html += "<h1>pfSense Firewall Status</h1><h3>Firmware Update</h3>";
+  html += "<div id='installProgress' class='progress-shell'><div class='progress-track'><div id='installBar' class='progress-bar'></div></div><p id='installStatus' class='progress-text'>Starting firmware download...</p></div>";
+  html += "<div class='msg P'><strong>Current firmware:</strong> ";
+  html += escapeHtml(kFirmwareVersion);
+  html += "</div>";
+  appendFirmwareReleaseInfo(html, info);
+  if (info.releaseBody.length() > 0) {
+    html += "<div class='msg'><strong>Release Notes</strong><br/>";
+    html += formatReleaseBody(escapeHtml(info.releaseBody));
+    html += "</div>";
+  }
+  html += "<script>function setFwProgress(percent,message,failed){var bar=document.getElementById('installBar');var shell=document.getElementById('installProgress');var status=document.getElementById('installStatus');if(bar){bar.style.width=percent+'%';}if(status){status.innerHTML=message;}if(shell){shell.className=failed?'progress-shell fail':'progress-shell';}}</script>";
+  return html;
+}
+
+String buildFirmwareUpdatePage(const FirmwareReleaseInfo &info, const String &message = String(), bool success = false) {
+  String html;
+  html.reserve(9500);
+  html += "<!DOCTYPE html><html lang='en'><head>";
+  html += "<meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1,user-scalable=no'/>";
+  html += "<title>Firmware Update</title>";
+  html += "<style>";
+  html += buildFirmwareUpdateStyles();
+  html += "#installProgress{display:none}</style></head><body><div class='wrap'>";
+  html += "<h1>pfSense Firewall Status</h1><h3>Firmware Update</h3>";
+  html += "<script>function startFirmwareInstall(){if(!confirm('Download and install this release now?'))return false;var buttons=document.querySelectorAll('.fw-install-btn');for(var i=0;i<buttons.length;i++){buttons[i].disabled=true;}window.location='/firmware-update/install';return false;}</script>";
+
+  if (message.length() > 0) {
+    html += "<div class='msg ";
+    html += success ? "S'" : "D'";
+    html += "><strong>";
+    html += success ? "Status" : "Notice";
+    html += "</strong><br/>";
+    html += escapeHtml(message);
+    html += "</div>";
+  }
+
+  html += "<div class='msg P'><strong>Current firmware:</strong> ";
+  html += escapeHtml(kFirmwareVersion);
+  html += "</div>";
+  html += "<div id='installProgress' class='progress-shell'><div class='progress-track'><div class='progress-bar'></div></div><p id='installStatus' class='progress-text'>Preparing firmware update...</p></div>";
+
+  appendFirmwareReleaseInfo(html, info);
 
   html += "<div class='msg ";
   html += info.updateAvailable ? "P'" : "S'";
@@ -281,7 +326,7 @@ String buildFirmwareUpdatePage(const FirmwareReleaseInfo &info, const String &me
   html += "' method='get' target='_blank'><button type='submit'>Open GitHub Releases</button></form>";
 
   if (WiFi.status() == WL_CONNECTED && info.assetUrl.length() > 0) {
-    html += "<form action='/firmware-update/install' method='post' onsubmit=\"return confirm('Download and install this release now?');\"><button class='D' type='submit'>Download & Flash Latest Release</button></form>";
+    html += "<form onsubmit='return startFirmwareInstall();'><button class='D fw-install-btn' type='submit'>Download & Flash Latest Release</button></form>";
   } else if (WiFi.status() != WL_CONNECTED) {
     html += "<div class='msg D'><strong>WiFi is not connected.</strong><br/>Firmware updates need network access.</div>";
   }
@@ -544,27 +589,53 @@ void setupPortalRoutes() {
     wm.server->send(200, "text/html", buildFirmwareUpdatePage(info, ok ? String() : errorMessage, ok));
   });
 
-  wm.server->on("/firmware-update/install", HTTP_POST, []() {
+  wm.server->on("/firmware-update/install", HTTP_GET, []() {
     FirmwareReleaseInfo info;
     String errorMessage;
     if (!fetchLatestFirmwareRelease(info, errorMessage)) {
-      info.currentVersion = kFirmwareVersion;
-      info.latestVersion = "unavailable";
-        info.releaseName = "GitHub release unavailable";
-        info.releaseBody.clear();
-        info.releaseUrl = kFirmwareGitHubReleasesUrl;
       wm.server->send(200, "text/html", buildFirmwareUpdatePage(info, errorMessage, false));
       return;
     }
 
-    if (!flashFirmwareAsset(info, errorMessage)) {
-      wm.server->send(200, "text/html", buildFirmwareUpdatePage(info, errorMessage, false));
+    wm.server->setContentLength(CONTENT_LENGTH_UNKNOWN);
+    wm.server->send(200, "text/html", "");
+    wm.server->sendContent(buildFirmwareInstallPageStart(info));
+
+    int lastPercent = -1;
+    bool flashed = flashFirmwareAsset(info, errorMessage, [&](size_t writtenBytes, size_t totalBytes) {
+      int percent = 0;
+      if (totalBytes > 0) {
+        percent = static_cast<int>((writtenBytes * 100U) / totalBytes);
+      } else if (writtenBytes > 0) {
+        percent = 95;
+      }
+      if (percent > 100) {
+        percent = 100;
+      }
+      if (percent == lastPercent) {
+        return;
+      }
+      lastPercent = percent;
+      String script = "<script>setFwProgress(";
+      script += percent;
+      script += ",\"";
+      script += escapeJson(percent >= 100 ? String("Finishing firmware update...") : String("Downloading and flashing firmware... ") + percent + "%");
+      script += "\",false);</script>";
+      wm.server->sendContent(script);
+    });
+
+    if (!flashed) {
+      String script = "<script>setFwProgress(100,\"";
+      script += escapeJson(errorMessage.length() ? errorMessage : String("Firmware update failed."));
+      script += "\",true);</script>";
+      wm.server->sendContent(script);
+      wm.server->sendContent("<hr><br/><form action='/firmware-update' method='get'><button type='submit'>Back to Firmware Update</button></form></div></body></html>");
       return;
     }
 
-    wm.server->send(200, "text/html", "<html><head><meta charset='utf-8'></head><body><h3>Firmware updated successfully. Rebooting now...</h3></body></html>");
-    wm.server->client().stop();
-    delay(1000);
+    wm.server->sendContent("<script>setFwProgress(100,\"Firmware updated successfully. Device is rebooting now...\",false);</script>");
+    wm.server->sendContent("</div></body></html>");
+    delay(1600);
     ESP.restart();
   });
 }

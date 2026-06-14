@@ -118,7 +118,7 @@ bool fetchLatestFirmwareRelease(FirmwareReleaseInfo &info, String &errorMessage)
   return true;
 }
 
-bool flashFirmwareAsset(const FirmwareReleaseInfo &info, String &errorMessage) {
+bool flashFirmwareAsset(const FirmwareReleaseInfo &info, String &errorMessage, const FirmwareProgressCallback &progressCallback) {
   if (info.assetUrl.length() == 0) {
     errorMessage = "No firmware download URL available";
     return false;
@@ -145,13 +145,65 @@ bool flashFirmwareAsset(const FirmwareReleaseInfo &info, String &errorMessage) {
   }
 
   int contentLength = http.getSize();
+  size_t totalBytes = contentLength > 0 ? static_cast<size_t>(contentLength) : 0;
   if (!Update.begin(contentLength > 0 ? contentLength : UPDATE_SIZE_UNKNOWN)) {
     errorMessage = "Unable to start OTA update";
     http.end();
     return false;
   }
 
-  size_t written = Update.writeStream(*http.getStreamPtr());
+  WiFiClient *stream = http.getStreamPtr();
+  uint8_t buffer[2048];
+  size_t written = 0;
+  unsigned long lastDataMs = millis();
+
+  if (progressCallback) {
+    progressCallback(0, totalBytes);
+  }
+
+  while (http.connected() && (contentLength > 0 || contentLength == -1)) {
+    size_t available = stream->available();
+    if (available == 0) {
+      if ((millis() - lastDataMs) > 15000) {
+        errorMessage = "Firmware download timed out";
+        Update.abort();
+        http.end();
+        return false;
+      }
+      delay(1);
+      continue;
+    }
+
+    size_t toRead = available;
+    if (toRead > sizeof(buffer)) {
+      toRead = sizeof(buffer);
+    }
+
+    int bytesRead = stream->readBytes(buffer, toRead);
+    if (bytesRead <= 0) {
+      delay(1);
+      continue;
+    }
+
+    lastDataMs = millis();
+    size_t chunkWritten = Update.write(buffer, bytesRead);
+    if (chunkWritten != static_cast<size_t>(bytesRead)) {
+      errorMessage = "OTA write failed: " + String(Update.errorString());
+      Update.abort();
+      http.end();
+      return false;
+    }
+
+    written += chunkWritten;
+    if (contentLength > 0) {
+      contentLength -= bytesRead;
+    }
+
+    if (progressCallback) {
+      progressCallback(written, totalBytes);
+    }
+  }
+
   bool finished = Update.end(true);
   http.end();
 
@@ -163,6 +215,10 @@ bool flashFirmwareAsset(const FirmwareReleaseInfo &info, String &errorMessage) {
   if (written == 0) {
     errorMessage = "OTA update wrote no data";
     return false;
+  }
+
+  if (progressCallback) {
+    progressCallback(written, totalBytes);
   }
 
   return true;
