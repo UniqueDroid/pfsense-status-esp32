@@ -516,6 +516,8 @@ void loopDashboard() {
   bool upperState = digitalRead(14);
   bool lowerState = digitalRead(0);
 
+  // Consume ISR-produced edge counters in the main loop to keep interrupts short
+  // and apply debouncing/gesture logic in one place.
   while (upperPressCount > 0) {
     upperPressCount--;
     if ((now - upperLastTransitionMs) < kButtonTransitionDebounceMs) {
@@ -564,6 +566,8 @@ void loopDashboard() {
     lowerLongPressHandled = false;
   }
 
+  // Long press currently only suppresses short-press actions. Hook point for
+  // future long-press features without touching ISR code.
   if (upperIsDown && !upperLongPressHandled && (now - upperPressStart) >= kLongPressMs) {
     upperLongPressHandled = true;
   }
@@ -590,6 +594,7 @@ void loopDashboard() {
 
   if ((now - lastUiRefreshMs) >= kUiRefreshMs) {
     lastUiRefreshMs = now;
+    // Prefer mutex-protected snapshot; fallback keeps UI responsive during API polling.
     if (xSemaphoreTake(xApiMutex, 0) == pdTRUE) {
       refreshLiveDataUi();
       xSemaphoreGive(xApiMutex);

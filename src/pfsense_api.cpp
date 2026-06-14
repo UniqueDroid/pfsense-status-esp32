@@ -192,6 +192,8 @@ void fetchWanTraffic() {
     return;
   }
 
+  // pfSense payload shape differs across versions: either top-level object/array
+  // or wrapped inside a "data" field. Handle both forms uniformly.
   JsonVariantConst root = doc["data"].isNull() ? doc.as<JsonVariantConst>() : doc["data"].as<JsonVariantConst>();
   JsonObjectConst wanObj;
 
@@ -278,6 +280,8 @@ void fetchWanTraffic() {
 
   if (hasIn && hasOut) {
     uint32_t nowMs = millis();
+    // Use monotonic byte counters to derive kbps from delta(bytes)/delta(time).
+    // Samples are pushed only when counters are sane to avoid spikes after resets.
     if (wanTrafficPrimed && nowMs > wanPrevSampleMs && inBytes >= wanPrevInBytes && outBytes >= wanPrevOutBytes) {
       float dt = (nowMs - wanPrevSampleMs) / 1000.0f;
       float rxKbps = ((inBytes - wanPrevInBytes) * 8.0f) / (dt * 1000.0f);
