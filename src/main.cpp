@@ -70,6 +70,7 @@ String lastUpdate = "00:00:00";
 
 // Polling
 uint32_t lastPoll = 0;
+// Shared brightness presets used by dashboard button cycling and boot init.
 const uint8_t kBrightnessLevels[] = {40, 96, 160, 255};
 const uint8_t kBrightnessLevelCount = sizeof(kBrightnessLevels) / sizeof(kBrightnessLevels[0]);
 uint8_t brightnessLevelIndex = kBrightnessLevelCount - 1;
@@ -138,6 +139,7 @@ void setup() {
 
   tft.init();
   tft.setRotation(DASHBOARD_ROTATION);
+  // Dashboard initialization also creates the API polling FreeRTOS task.
   initDashboard();
   
   // Start networking and portal stack.
@@ -145,8 +147,10 @@ void setup() {
   WiFi.setAutoReconnect(true);
   WiFi.persistent(false);
   
-  configureWiFi();  // Uses WiFiManager with ConfigManager integration
+  // WiFiManager configures STA/AP mode and portal routes depending on saved config.
+  configureWiFi();
   if (WiFi.status() == WL_CONNECTED && isConfigured()) {
+    // Keep local menu available even after normal STA reconnect.
     wm.startWebPortal();
   }
   setupPortalRoutes();

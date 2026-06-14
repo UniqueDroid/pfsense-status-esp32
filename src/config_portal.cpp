@@ -89,6 +89,7 @@ void setStepText(lv_obj_t *label, const char *name, BootStepState state, const c
 }
 
 bool tryApiCheckHttp(const String &url) {
+  // Lightweight probe used by boot sequence to validate host/key quickly.
   WiFiClient client;
   HTTPClient http;
   if (!http.begin(client, url)) {
@@ -103,6 +104,7 @@ bool tryApiCheckHttp(const String &url) {
 }
 
 bool tryApiCheckHttps(const String &url) {
+  // TLS probe first; cert checks are intentionally relaxed for local appliances.
   WiFiClientSecure client;
   client.setInsecure();
   client.setHandshakeTimeout(6);
@@ -125,6 +127,7 @@ bool isApiReachable() {
 
   String host = String(pfSenseHost);
   String path = "/api/v2/status/gateways";
+  // Prefer HTTPS and fallback to HTTP to tolerate mixed pfSense setups.
   if (tryApiCheckHttps(String("https://") + host + path)) {
     return true;
   }
@@ -350,6 +353,7 @@ String buildFirmwareUpdatePage(const FirmwareReleaseInfo &info, const String &me
 }
 
 void applyPortalCustomHtml(bool firstRun) {
+  // WiFiManager stores pointers, so keep backing strings in module-level storage.
   gCustomMenuHtml = buildCustomMenuHtml(firstRun);
   gCustomStatusHtml = buildCustomStatusHtml(firstRun);
   wm.setCustomMenuHTML(gCustomMenuHtml.c_str());
@@ -357,6 +361,7 @@ void applyPortalCustomHtml(bool firstRun) {
 }
 
 void startProtectedConfigPortal() {
+  // Ensure AP is recreated with the expected SSID/password after mode switches.
   WiFi.softAPdisconnect(true);
   wm.startConfigPortal(kApName, kApPassword);
 }
@@ -403,7 +408,7 @@ void persistFirewallConfig() {
   strlcpy(pfSenseHost, host.c_str(), sizeof(pfSenseHost));
   strlcpy(apiKey, key.c_str(), sizeof(apiKey));
   
-  // Save to ConfigManager
+  // Save sanitized values in persistent config for next boot.
   ConfigManager& cfg = ConfigManager::getInstance();
   cfg.setPfsenseHost(pfSenseHost);
   cfg.setApiKey(apiKey);
@@ -412,7 +417,7 @@ void persistFirewallConfig() {
   }
   cfg.saveConfig();
   
-  // Recalculate boot sequence after saving config
+  // Re-evaluate boot mode immediately so overlay/status reflects new state.
   bootSequenceEnabled = cfg.isConfigured();
   bootHasApiKey = bootSequenceEnabled;
   if (bootOverlay) {
@@ -421,6 +426,7 @@ void persistFirewallConfig() {
 }
 
 void drawBootScreen() {
+  // Rebuild overlay from scratch to avoid stale LVGL object pointers.
   clearBootOverlay();
 
   bootOverlay = lv_obj_create(lv_scr_act());
@@ -517,6 +523,7 @@ void dismissBootScreenIfConnected() {
     setStepText(bootStepWifi, "WiFi", BootStepState::Pending, "reconnecting");
   }
 
+  // Retry failed API checks periodically while overlay is still visible.
   if (bootHasApiKey && wifiOk && (!bootApiChecked || (!bootApiReachableState && (millis() - bootLastApiCheckMs) >= kBootApiRetryMs))) {
     setStepText(bootStepApi, "API", BootStepState::Pending, "checking host");
     bootApiReachableState = isApiReachable();
@@ -623,6 +630,7 @@ void setupPortalRoutes() {
     wm.server->send(200, "text/html", "");
     wm.server->sendContent(buildFirmwareInstallPageStart(info));
 
+    // Stream incremental progress into the page while OTA writes flash blocks.
     int lastPercent = -1;
     bool flashed = flashFirmwareAsset(info, errorMessage, [&](size_t writtenBytes, size_t totalBytes) {
       int percent = 0;
@@ -682,7 +690,7 @@ void configureWiFi() {
   wm.setShowInfoErase(false);
   wm.setShowInfoUpdate(false);
 
-  // Load current values from ConfigManager
+  // Seed portal fields from persisted config so edits are incremental.
   const DeviceConfig& cfg = ConfigManager::getInstance().getConfig();
 
   if (!pfsenseIpParam) {
@@ -723,7 +731,7 @@ void configureWiFi() {
     return;
   }
 
-  // In configured mode, first try to reconnect to previously stored STA credentials.
+  // In configured mode, first try STA reconnect before exposing AP portal.
   WiFi.begin();
   uint32_t wifiWaitStart = millis();
   while (WiFi.status() != WL_CONNECTED && (millis() - wifiWaitStart) < 8000) {
