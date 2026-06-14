@@ -1,3 +1,4 @@
+// LVGL dashboard runtime: display driver, page switching, button handling and UI refresh.
 #include "dashboard.h"
 
 #include <lvgl.h>

@@ -1,3 +1,4 @@
+// Full-width traffic graph page layout.
 #include "lvgl_screens.h"
 #include "globals.h"
 

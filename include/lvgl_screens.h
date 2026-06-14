@@ -1,5 +1,6 @@
 #pragma once
 
+// LVGL screen/widget references shared between screen builders and runtime updater.
 #include <lvgl.h>
 
 struct LvglScreenRefs {

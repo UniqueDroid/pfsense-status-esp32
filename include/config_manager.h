@@ -1,5 +1,6 @@
 #pragma once
 
+// Owns load/save/clear operations for persisted device configuration.
 #include <Arduino.h>
 #include <ArduinoJson.h>
 

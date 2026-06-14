@@ -1,5 +1,6 @@
 #pragma once
 
+// OTA update interface using GitHub releases as firmware source.
 #include <Arduino.h>
 #include <functional>
 

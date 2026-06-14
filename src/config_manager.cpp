@@ -1,3 +1,4 @@
+// Persistent configuration manager backed by ESP32 Preferences (NVS).
 #include "config_manager.h"
 #include "globals.h"
 #include <Preferences.h>

@@ -1,5 +1,6 @@
 #pragma once
 
+// Compile-time board profile selector.
 // Select one board profile via build flag in platformio.ini.
 #if defined(BOARD_PROFILE_LILYGO_T_DISPLAY_S3)
 #include "boards/lilygo_t_display_s3.h"

@@ -1,5 +1,6 @@
 #pragma once
 
+// Reusable helpers for parsing pfSense payloads and normalizing display values.
 #include "globals.h"
 
 // Helper functions for JSON parsing

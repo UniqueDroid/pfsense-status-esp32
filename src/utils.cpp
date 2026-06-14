@@ -1,3 +1,4 @@
+// Shared parsing and normalization helpers for API payloads and traffic data.
 #include "utils.h"
 #include "globals.h"
 

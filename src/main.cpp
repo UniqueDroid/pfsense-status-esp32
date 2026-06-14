@@ -1,3 +1,5 @@
+// Main application entrypoint.
+// Initializes device config, display/dashboard, WiFi portal and runtime loop.
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <Preferences.h>
@@ -123,7 +125,7 @@ void enableBacklight() {
 void setup() {
   delay(200);
 
-  // Load configuration from Preferences
+  // Load persisted configuration first so globals and portal state are in sync.
   ConfigManager& cfg = ConfigManager::getInstance();
   cfg.loadConfig();
   
@@ -138,7 +140,7 @@ void setup() {
   tft.setRotation(DASHBOARD_ROTATION);
   initDashboard();
   
-  // Use WiFiManager for setup but with ConfigManager backing
+  // Start networking and portal stack.
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
   WiFi.persistent(false);
@@ -151,5 +153,6 @@ void setup() {
 }
 
 void loop() {
+  // UI and data polling are driven by the dashboard module.
   loopDashboard();
 }

@@ -1,3 +1,5 @@
+// Captive portal, web menu and OTA UI logic.
+// This module also owns boot overlay state and custom portal routes.
 #include <Arduino.h>
 #include <lvgl.h>
 #include <HTTPClient.h>
@@ -5,6 +7,7 @@
 
 #include "config_portal.h"
 #include "config_manager.h"
+#include "assets/project_logo_png.h"
 #include "firmware_update.h"
 #include "firmware_version.h"
 #include "globals.h"
@@ -194,7 +197,7 @@ String buildCustomMenuHtml(bool firstRun) {
   html += "<form style='margin:0 0 10px 0' action='/factory-erase' method='post' onsubmit=\"return confirm('Erase all saved config and reboot?');\">";
   html += "<button style='background:#b00020;color:#fff'>Config Erase</button></form>";
   html += "<form style='margin:0 0 10px 0' action='/firmware-update' method='get'><button>Firmware Update</button></form>";
-  html += "<form style='margin:0 0 12px 0' action='/logout' method='get'><button>Logout</button></form>";
+  html += "<form style='margin:0 0 10px 0' action='/logout' method='get'><button>Logout</button></form>";
   return html;
 }
 
@@ -230,12 +233,22 @@ String buildFirmwareUpdateStyles() {
   css += ".c,body{text-align:center;font-family:verdana}div,input,select{padding:5px;font-size:1em;margin:5px 0;box-sizing:border-box}";
   css += "input,button,select,.msg{border-radius:.3rem;width:100%}button{cursor:pointer;border:0;background-color:#1fa3ec;color:#fff;line-height:2.4rem;font-size:1.2rem;width:100%}";
   css += "button.D{background-color:#dc3630}.wrap{text-align:left;display:inline-block;min-width:260px;max-width:500px}";
+  css += ".brand{display:flex;justify-content:center;align-items:center;min-height:64px;margin:6px 0 4px 0}.brand-logo{display:block;max-width:min(100%,320px);height:auto;margin:0 auto}.brand-title{margin:0;line-height:1.1}body.haslogo .brand-title{display:none}";
   css += "a{color:#000;font-weight:700;text-decoration:none}a:hover{color:#1fa3ec;text-decoration:underline}";
   css += ".msg{padding:20px;margin:20px 0;border:1px solid #eee;border-left-width:5px;border-left-color:#777}";
   css += ".msg.S{border-left-color:#5cb85c}.msg.D{border-left-color:#dc3630}.msg.P{border-left-color:#1fa3ec}";
   css += "dt{font-weight:bold}dd{margin:0;padding:0 0 .5em 0;min-height:12px}";
-  css += ".progress-shell{margin:18px 0 14px 0}.progress-track{width:100%;height:14px;background:#dfe5ea;border-radius:999px;overflow:hidden;border:1px solid #c5d0d9}.progress-bar{height:100%;width:0%;background:linear-gradient(90deg,#1fa3ec,#5cb85c);border-radius:999px;transition:width .2s ease}.progress-shell.fail .progress-bar{background:#dc3630}.progress-text{font-size:.95em;color:#555;padding:0;margin:8px 0 0 0}";
+  css += ".progress-shell{margin:18px 0 14px 0}.progress-track{width:100%;height:14px;background:#dfe5ea;border-radius:999px;overflow:hidden;border:1px solid #c5d0d9;padding:0 !important;margin:0 !important}.progress-bar{height:100%;width:0%;background:linear-gradient(90deg,#1fa3ec,#5cb85c);border-radius:999px;transition:width .2s ease;padding:0 !important;margin:0 !important;display:block}.progress-shell.fail .progress-bar{background:#dc3630}.progress-text{font-size:.95em;color:#555;padding:0;margin:8px 0 0 0}";
   return css;
+}
+
+String buildPortalHeaderHtml(const String &subtitle) {
+  String html;
+  html.reserve(280);
+  html += "<div class='brand'><img class='brand-logo' src='/project-logo.png' alt='Project logo' onload=\"document.body.classList.add('haslogo')\" onerror=\"this.style.display='none'\"><h1 class='brand-title'>pfSense Firewall Status</h1></div><h3>";
+  html += escapeHtml(subtitle);
+  html += "</h3>";
+  return html;
 }
 
 void appendFirmwareReleaseInfo(String &html, const FirmwareReleaseInfo &info) {
@@ -265,7 +278,7 @@ String buildFirmwareInstallPageStart(const FirmwareReleaseInfo &info) {
   html += "<title>Firmware Update</title><style>";
   html += buildFirmwareUpdateStyles();
   html += "</style></head><body><div class='wrap'>";
-  html += "<h1>pfSense Firewall Status</h1><h3>Firmware Update</h3>";
+  html += buildPortalHeaderHtml("Firmware Update");
   html += "<div id='installProgress' class='progress-shell'><div class='progress-track'><div id='installBar' class='progress-bar'></div></div><p id='installStatus' class='progress-text'>Starting firmware download...</p></div>";
   html += "<div class='msg P'><strong>Current firmware:</strong> ";
   html += escapeHtml(kFirmwareVersion);
@@ -289,7 +302,7 @@ String buildFirmwareUpdatePage(const FirmwareReleaseInfo &info, const String &me
   html += "<style>";
   html += buildFirmwareUpdateStyles();
   html += "#installProgress{display:none}</style></head><body><div class='wrap'>";
-  html += "<h1>pfSense Firewall Status</h1><h3>Firmware Update</h3>";
+  html += buildPortalHeaderHtml("Firmware Update");
   html += "<script>function startFirmwareInstall(){if(!confirm('Download and install this release now?'))return false;var buttons=document.querySelectorAll('.fw-install-btn');for(var i=0;i<buttons.length;i++){buttons[i].disabled=true;}window.location='/firmware-update/install';return false;}</script>";
 
   if (message.length() > 0) {
@@ -323,7 +336,7 @@ String buildFirmwareUpdatePage(const FirmwareReleaseInfo &info, const String &me
 
   html += "<form action='";
   html += kFirmwareGitHubReleasesUrl;
-  html += "' method='get' target='_blank'><button type='submit'>Open GitHub Releases</button></form>";
+  html += "' method='get' target='_blank' style='margin-bottom:14px'><button type='submit'>Open GitHub Releases</button></form>";
 
   if (WiFi.status() == WL_CONNECTED && info.assetUrl.length() > 0) {
     html += "<form onsubmit='return startFirmwareInstall();'><button class='D fw-install-btn' type='submit'>Download & Flash Latest Release</button></form>";
@@ -559,6 +572,15 @@ void setupPortalRoutes() {
   if (!wm.server) {
     return;
   }
+
+  // Serve project logo directly from firmware flash to avoid external dependencies.
+  wm.server->on("/project-logo.png", HTTP_GET, []() {
+    wm.server->sendHeader("Cache-Control", "public, max-age=86400");
+    wm.server->setContentLength(kProjectLogoPngLen);
+    wm.server->send(200, "image/png", "");
+    WiFiClient client = wm.server->client();
+    client.write(kProjectLogoPng, kProjectLogoPngLen);
+  });
 
   auto eraseAllAndReboot = []() {
     BOOTLOG("[BOOT] Factory erase requested\n");

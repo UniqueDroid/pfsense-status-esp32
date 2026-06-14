@@ -1,5 +1,6 @@
 #pragma once
 
+// Cross-module runtime state shared by dashboard, portal and API modules.
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include "boards/board_profile.h"

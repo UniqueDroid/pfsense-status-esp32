@@ -1,3 +1,4 @@
+// GitHub release lookup and OTA flashing implementation.
 #include "firmware_update.h"
 
 #include <ArduinoJson.h>
@@ -161,6 +162,7 @@ bool flashFirmwareAsset(const FirmwareReleaseInfo &info, String &errorMessage, c
     progressCallback(0, totalBytes);
   }
 
+  // Stream chunks from HTTP directly into Update to keep RAM usage low.
   while (http.connected() && (contentLength > 0 || contentLength == -1)) {
     size_t available = stream->available();
     if (available == 0) {

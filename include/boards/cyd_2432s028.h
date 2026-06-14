@@ -1,5 +1,6 @@
 #pragma once
 
+// Hardware/profile defines for CYD 2.8" (2432S028).
 // App layout
 #define DASHBOARD_WIDTH 320
 #define DASHBOARD_HEIGHT 480

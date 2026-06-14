@@ -1,3 +1,4 @@
+// Metrics page layout with enlarged CPU/RAM/TEMP and latency/loss values.
 #include "lvgl_screens.h"
 
 void createScreenMetrics(lv_obj_t *page, LvglScreenRefs &refs) {

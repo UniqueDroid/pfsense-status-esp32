@@ -1,3 +1,4 @@
+// pfSense REST API client for gateway/system metrics and traffic samples.
 #include "pfsense_api.h"
 #include "utils.h"
 #include "globals.h"
@@ -31,7 +32,7 @@ int apiGet(const char *path, String &payload) {
   const String httpsUrl = String("https://") + host + path;
   const String httpUrl = String("http://") + host + path;
 
-  // First try HTTPS (preferred).
+  // First try HTTPS (preferred for security).
   int httpsCode = httpsGet(httpsUrl, payload);
   if (httpsCode > 0) {
     return httpsCode;

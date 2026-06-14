@@ -1,4 +1,6 @@
-# pfsene-Status-ESP32
+![pfSense-Status-ESP32 Logo](src/pfSense-Firewall-Status_Logo.png)
+
+# pfsense-Status-ESP32
 
 ESP32 Dashboard fuer pfSense mit konfigurierbaren Board-Profilen (z. B. LilyGO T-Display S3 oder CYD).
 

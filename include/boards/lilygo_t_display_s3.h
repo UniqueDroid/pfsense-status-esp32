@@ -1,5 +1,6 @@
 #pragma once
 
+// Hardware/profile defines for LilyGO T-Display S3.
 // App layout
 #define DASHBOARD_WIDTH 320
 #define DASHBOARD_HEIGHT 170

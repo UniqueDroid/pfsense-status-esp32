@@ -1,3 +1,4 @@
+// Main dashboard page layout (status card, compact metric bars and mini traffic chart).
 #include "lvgl_screens.h"
 
 namespace {
