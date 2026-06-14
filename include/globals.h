@@ -14,6 +14,7 @@ extern TFT_eSprite *sprite;  // Pointer to allow lazy initialization
 extern WiFiManager wm;
 extern WiFiManagerParameter *pfsenseIpParam;
 extern WiFiManagerParameter *apiKeyParam;
+extern WiFiManagerParameter *menuPasswordParam;
 
 // Configuration
 extern char pfSenseHost[64];
@@ -46,3 +47,5 @@ extern String lastUpdate;
 // Polling
 extern uint32_t lastPoll;
 extern const uint32_t kPollMs;
+extern const char *kApName;
+extern const char *kApPassword;

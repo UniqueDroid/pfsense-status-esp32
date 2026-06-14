@@ -1,192 +1,213 @@
 #include "dashboard.h"
-#include "globals.h"
-#include "boards/board_profile.h"
+
+#include <lvgl.h>
 #include <WiFi.h>
+#include <driver/gpio.h>
+
+#include "config_portal.h"
+#include "globals.h"
+#include "lvgl_screens.h"
+#include "pfsense_api.h"
 
 namespace {
-uint16_t panelColor(uint16_t logicalColor) {
-#if defined(BOARD_PROFILE_LILYGO_T_DISPLAY_S3)
-  // LilyGO T-Display-S3 panel wiring on this setup needs channel remapping.
-  switch (logicalColor) {
-    case TFT_RED: return TFT_BLUE;
-    case TFT_BLUE: return TFT_RED;
-    case TFT_YELLOW: return TFT_CYAN;
-    case TFT_CYAN: return TFT_YELLOW;
-    default: return logicalColor;
-  }
-#else
-  return logicalColor;
+constexpr uint16_t kBufferLines = 24;
+constexpr uint32_t kButtonDebounceMsLocal = 120;
+constexpr uint32_t kUiRefreshMs = 250;
+constexpr uint32_t kWifiRetryMsLocal = 10000;
+
+static SemaphoreHandle_t xApiMutex = nullptr;
+static volatile bool apiDataReady = false;
+
+static lv_color_t drawBuf[DASHBOARD_WIDTH * kBufferLines];
+static lv_disp_draw_buf_t dispDrawBuf;
+static lv_disp_drv_t dispDrv;
+
+static uint32_t lastTickMs = 0;
+static uint32_t lastUiRefreshMs = 0;
+static uint32_t lastWifiRetry = 0;
+static uint32_t lastUpperActionMs = 0;
+static uint32_t lastLowerActionMs = 0;
+
+static bool lastUpperState = HIGH;
+static bool lastLowerState = HIGH;
+static uint8_t pageIndex = 0;
+static uint8_t brightnessIndex = 3;
+static const uint8_t brightnessLevels[] = {40, 96, 160, 255};
+
+static lv_obj_t *pill = nullptr;
+static lv_obj_t *wifiIcon = nullptr;
+static lv_obj_t *pages[3] = {nullptr, nullptr, nullptr};
+static LvglScreenRefs refs;
+
+static lv_obj_t *footerHostVal = nullptr;
+static lv_obj_t *footerIpVal = nullptr;
+// Button long-press state
+static uint32_t upperPressStart = 0;
+static bool upperIsDown = false;
+static uint32_t lowerPressStart = 0;
+static bool lowerIsDown = false;
+static bool upperLongPressHandled = false;
+static bool lowerLongPressHandled = false;
+static volatile uint8_t upperPressCount = 0;
+static volatile uint8_t upperReleaseCount = 0;
+static volatile uint8_t lowerPressCount = 0;
+static volatile uint8_t lowerReleaseCount = 0;
+static uint32_t upperLastTransitionMs = 0;
+static uint32_t lowerLastTransitionMs = 0;
+constexpr uint32_t kLongPressMs = 850;
+constexpr uint32_t kButtonTransitionDebounceMs = 25;
+
+#define cpuBar refs.cpuBar
+#define ramBar refs.ramBar
+#define tempBar refs.tempBar
+#define cpuVal refs.cpuVal
+#define ramVal refs.ramVal
+#define tempVal refs.tempVal
+#define mainStatusCard refs.mainStatusCard
+#define mainStatusVal refs.mainStatusVal
+#define mainRttVal refs.mainRttVal
+#define mainRttSdLabel refs.mainRttSdLabel
+#define mainRttSdVal refs.mainRttSdVal
+#define mainLossVal refs.mainLossVal
+#define mainHostVal refs.mainHostVal
+#define mainIpVal refs.mainIpVal
+#define mainChartRxVal refs.mainChartRxVal
+#define mainChartTxVal refs.mainChartTxVal
+#define mainTrafficChart refs.mainTrafficChart
+#define mainRxSeries refs.mainRxSeries
+#define mainTxSeries refs.mainTxSeries
+#define chartRxVal refs.chartRxVal
+#define chartTxVal refs.chartTxVal
+#define trafficChart refs.trafficChart
+#define rxSeries refs.rxSeries
+#define txSeries refs.txSeries
+#define rttVal refs.rttVal
+#define rttSdVal refs.rttSdVal
+#define lossVal refs.lossVal
+#define uptimeVal refs.uptimeVal
+#define hostVal refs.hostVal
+#define bigCpuBar refs.bigCpuBar
+#define bigCpuVal refs.bigCpuVal
+#define bigRamBar refs.bigRamBar
+#define bigRamVal refs.bigRamVal
+#define bigTempBar refs.bigTempBar
+#define bigTempVal refs.bigTempVal
+#define bigRttVal refs.bigRttVal
+#define bigRttSdVal refs.bigRttSdVal
+#define bigLossVal refs.bigLossVal
+#define espInfoSsid refs.espInfoSsid
+#define espInfoIp refs.espInfoIp
+#define espInfoMac refs.espInfoMac
+#define espInfoRssi refs.espInfoRssi
+#define espInfoGw refs.espInfoGw
+#define espInfoSubnet refs.espInfoSubnet
+#define espInfoChip refs.espInfoChip
+#define espInfoCpu refs.espInfoCpu
+#define espInfoHeap refs.espInfoHeap
+#define espInfoFlash refs.espInfoFlash
+#define espInfoUptime refs.espInfoUptime
+
+String formatUptimeLocal(uint32_t uptimeSeconds) {
+  uint32_t hours = uptimeSeconds / 3600;
+  uint32_t minutes = (uptimeSeconds % 3600) / 60;
+  uint32_t seconds = uptimeSeconds % 60;
+  char buffer[20];
+  snprintf(buffer, sizeof(buffer), "%02lu:%02lu:%02lu",
+           static_cast<unsigned long>(hours),
+           static_cast<unsigned long>(minutes),
+           static_cast<unsigned long>(seconds));
+  return String(buffer);
+}
+
+void applyBrightness() {
+#if defined(TFT_BL)
+  analogWrite(TFT_BL, brightnessLevels[brightnessIndex]);
 #endif
 }
-} // namespace
 
-template <typename DisplayT>
-void drawBar(DisplayT &display, int x, int y, int w, int h, int percent, uint16_t color) {
-  display.drawRect(x, y, w, h, TFT_DARKGREY);
-  display.fillRect(x + 1, y + 1, w - 2, h - 2, TFT_BLACK);
-  int fill = (w - 2) * percent / 100;
-  display.fillRect(x + 1, y + 1, fill, h - 2, color);
-}
-
-template <typename DisplayT>
-void clearDashboard(DisplayT &display) {
-  display.fillScreen(TFT_BLACK);
-}
-
-template <>
-void clearDashboard<TFT_eSprite>(TFT_eSprite &display) {
-  display.fillSprite(TFT_BLACK);
-}
-
-#if defined(BOARD_PROFILE_CYD_2432S028)
-template <>
-void clearDashboard<TFT_eSPI>(TFT_eSPI &display) {
-  const int screenW = display.width();
-  const int screenH = display.height();
-  display.fillRect(0, 24, screenW, screenH - 24 - 18, TFT_BLACK);
-}
-#endif
-
-template <typename DisplayT>
-void drawDashboardOn(DisplayT &display) {
-  clearDashboard(display);
-
-  const int screenW = display.width();
-  const int screenH = display.height();
-  const int headerH = 24;
-  const int footerH = 18;
-  const int contentTop = headerH + 4;
-  const int contentBottom = screenH - footerH - 1;
-
-#if defined(BOARD_PROFILE_CYD_2432S028)
-  const int leftX = 4;
-  const int leftLabelX = 4;
-  const int leftBarX = 38;
-  const int leftValueX = screenW - 32;
-  const int leftBarW = leftValueX - leftBarX - 10;
-  const int topRowY = contentTop + 2;
-  const int rowGap = 30;
-  const int statusX = 4;
-  const int statusY = 122;
-  const int statusW = screenW - 8;
-  const int statusH = 44;
-  const int graphX = 4;
-  const int graphY = statusY + statusH + 8;
-  const int graphW = screenW - 8;
-  int graphH = contentBottom - graphY + 1;
-  if (graphH < 92) {
-    graphH = 92;
-  }
-#else
-  const int leftX = 10;
-  const int leftLabelX = 10;
-  const int leftBarX = 52;
-  const int leftBarW = 102;
-  const int leftValueX = 160;
-  const int topRowY = contentTop + 2;
-  const int rowGap = (DASHBOARD_HEIGHT >= 220) ? 30 : 22;
-  const int statusX = 198;
-  const int statusY = contentTop + 2;
-  const int statusW = 114;
-  const int statusH = (DASHBOARD_HEIGHT >= 220) ? 52 : 38;
-  const int graphX = statusX;
-  const int graphY = statusY + statusH + 8;
-  const int graphW = statusW;
-  int graphH = contentBottom - graphY + 1;
-  if (graphH < 28) {
-    graphH = 28;
-  }
-#endif
-
-  // Header
-  display.fillRect(0, 0, screenW, headerH, tft.color565(40, 40, 40));
-  display.setTextColor(TFT_WHITE, tft.color565(40, 40, 40));
-  display.setTextFont(2);
-  display.drawString("pfSense Firewall Status", 8, 5);
-
-  // Left metrics layout
-  int metricRowY1 = topRowY;
-  int metricRowY2 = metricRowY1 + rowGap;
-  int metricRowY3 = metricRowY2 + rowGap;
-
-  display.setTextFont(2);
-  display.setTextColor(TFT_WHITE, TFT_BLACK);
-
-  // CPU
-  uint16_t cpuColor = TFT_CYAN;
-  display.drawString("CPU", leftLabelX, metricRowY1);
-  drawBar(display, leftBarX, metricRowY1 + 2, leftBarW, 12, cpuPercent, panelColor(cpuColor));
-  display.drawString(String(cpuPercent) + "%", leftValueX, metricRowY1 - 1);
-
-  // RAM
-  display.drawString("RAM", leftLabelX, metricRowY2);
-  drawBar(display, leftBarX, metricRowY2 + 2, leftBarW, 12, memPercent, panelColor(TFT_YELLOW));
-  display.drawString(String(memPercent) + "%", leftValueX, metricRowY2 - 1);
-
-  // TEMP
-  display.setTextColor(TFT_WHITE, TFT_BLACK);
-  display.drawString("TEMP", leftLabelX, metricRowY3);
-  drawBar(display, leftBarX, metricRowY3 + 2, leftBarW, 12, tempPercent, panelColor(TFT_RED));
-  display.setTextColor(TFT_WHITE, TFT_BLACK);
-  display.drawString(tempValue, leftValueX, metricRowY3 - 1);
-
-  // Network info
-  int networkRowY = contentBottom - 30;
-  if (networkRowY < metricRowY3 + 16) {
-    networkRowY = metricRowY3 + 16;
-  }
-  int lossRowY = networkRowY + 14;
-  if (lossRowY > contentBottom - 2) {
-    lossRowY = contentBottom - 2;
-    networkRowY = lossRowY - 14;
-  }
-
-  display.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-  display.drawString("RTT", 10, networkRowY);
-  display.setTextColor(TFT_ORANGE, TFT_BLACK);
-  display.drawString(wanDelay, 42, networkRowY);
-  if (wanRttSd != "-") {
-    int x = 42 + display.textWidth(wanDelay + " ");
-    display.setTextColor(TFT_WHITE, TFT_BLACK);
-    display.drawString("RTTsd", x, networkRowY);
-    x += display.textWidth("RTTsd ");
-    display.setTextColor(TFT_ORANGE, TFT_BLACK);
-    display.drawString(wanRttSd, x, networkRowY);
-  }
-
-  display.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-  display.drawString("Loss", 10, lossRowY);
-  display.setTextColor(TFT_WHITE, TFT_BLACK);
-  display.drawString(wanLoss, 42, lossRowY);
-
-  // Status box
-  bool isOnline = (wanStatus == "online" || wanStatus == "none");
-  uint16_t statusColor = isOnline ? panelColor(TFT_GREEN) : panelColor(TFT_RED);
-
-  display.drawRoundRect(statusX, statusY, statusW, statusH, 6, TFT_DARKGREY);
-  display.setTextColor(statusColor, TFT_BLACK);
-  if (statusH >= 50) {
-    display.setTextFont(4);
-    display.setTextSize(1);
+void IRAM_ATTR onUpperButtonChange() {
+  if (gpio_get_level(GPIO_NUM_14) == 0) {
+    if (upperPressCount < 255) upperPressCount++;
   } else {
-    display.setTextFont(2);
-    display.setTextSize(2);
+    if (upperReleaseCount < 255) upperReleaseCount++;
   }
-  String onlineLabel = isOnline ? "Online" : "Offline";
-  const int statusCenterX = statusX + (statusW / 2);
-  const int statusCenterY = statusY + (statusH / 2);
-  display.setTextDatum(MC_DATUM);
-  display.drawString(onlineLabel, statusCenterX, statusCenterY);
-  display.setTextSize(1);
-  display.setTextDatum(TL_DATUM);
+}
 
-  // Traffic graph
-  if (graphH > 18) {
-    display.fillRoundRect(graphX, graphY, graphW, graphH, 6, tft.color565(16, 16, 16));
-    int gx = graphX + 4;
-    int gy = graphY + 4;
-    int gw = graphW - 8;
-    int gh = graphH - 8;
+void IRAM_ATTR onLowerButtonChange() {
+  if (gpio_get_level(GPIO_NUM_0) == 0) {
+    if (lowerPressCount < 255) lowerPressCount++;
+  } else {
+    if (lowerReleaseCount < 255) lowerReleaseCount++;
+  }
+}
+
+void cycleBrightness() {
+  if (brightnessIndex == 0) {
+    brightnessIndex = 3;
+  } else {
+    brightnessIndex--;
+  }
+  applyBrightness();
+}
+
+void flushCallback(lv_disp_drv_t *disp, const lv_area_t *area, lv_color_t *colorP) {
+  int32_t w = area->x2 - area->x1 + 1;
+  int32_t h = area->y2 - area->y1 + 1;
+
+  tft.startWrite();
+  tft.setAddrWindow(area->x1, area->y1, w, h);
+  tft.pushColors((uint16_t *)&colorP->full, w * h, true);
+  tft.endWrite();
+
+  lv_disp_flush_ready(disp);
+}
+
+void setPage(uint8_t index) {
+  pageIndex = index % 3;
+  for (int i = 0; i < 3; ++i) {
+    if (i == pageIndex) {
+      lv_obj_clear_flag(pages[i], LV_OBJ_FLAG_HIDDEN);
+    } else {
+      lv_obj_add_flag(pages[i], LV_OBJ_FLAG_HIDDEN);
+    }
+  }
+  // Page 0 has its own status card; hide global pill, shift WiFi icon to far right.
+  if (pageIndex == 0) {
+    lv_obj_add_flag(pill, LV_OBJ_FLAG_HIDDEN);
+    if (mainHostVal) lv_obj_add_flag(mainHostVal, LV_OBJ_FLAG_HIDDEN);
+    if (mainIpVal) lv_obj_add_flag(mainIpVal, LV_OBJ_FLAG_HIDDEN);
+    if (wifiIcon) lv_obj_align(wifiIcon, LV_ALIGN_TOP_RIGHT, -10, 8);
+  } else {
+    lv_obj_clear_flag(pill, LV_OBJ_FLAG_HIDDEN);
+    lv_label_set_text(pill, LV_SYMBOL_OK);
+    // Subpages use a plain icon-only status (no badge background).
+    lv_obj_set_style_bg_opa(pill, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_pad_left(pill, 0, 0);
+    lv_obj_set_style_pad_right(pill, 0, 0);
+    lv_obj_set_style_pad_top(pill, 0, 0);
+    lv_obj_set_style_pad_bottom(pill, 0, 0);
+    lv_obj_align(pill, LV_ALIGN_TOP_RIGHT, -30, 7);
+    if (mainHostVal) lv_obj_clear_flag(mainHostVal, LV_OBJ_FLAG_HIDDEN);
+    if (mainIpVal) lv_obj_clear_flag(mainIpVal, LV_OBJ_FLAG_HIDDEN);
+    if (wifiIcon) lv_obj_align(wifiIcon, LV_ALIGN_TOP_RIGHT, -10, 8);
+  }
+}
+
+void refreshChartData() {
+  auto drawTraffic = [&](lv_obj_t *canvas, int w, int h) {
+    if (!canvas || kTrafficPoints < 2) {
+      return;
+    }
+
+    lv_canvas_fill_bg(canvas, lv_color_hex(0x171C24), LV_OPA_COVER);
+
+    const int gx = 4;
+    const int gy = 4;
+    const int gw = w - 8;
+    const int gh = h - 8;
+    if (gw <= 1 || gh <= 1) {
+      return;
+    }
 
     float maxRxKbps = 1.0f;
     float maxTxKbps = 1.0f;
@@ -195,63 +216,388 @@ void drawDashboardOn(DisplayT &display) {
       if (wanTxHistory[i] > maxTxKbps) maxTxKbps = wanTxHistory[i];
     }
 
+    lv_draw_line_dsc_t rxDsc;
+    lv_draw_line_dsc_init(&rxDsc);
+    rxDsc.color = lv_color_hex(0x2AC7D8);
+    rxDsc.width = 1;
+
+    lv_draw_line_dsc_t txDsc;
+    lv_draw_line_dsc_init(&txDsc);
+    txDsc.color = lv_color_hex(0xF5B942);
+    txDsc.width = 1;
+
     for (int i = 1; i < kTrafficPoints; ++i) {
       int x1 = gx + ((i - 1) * (gw - 1)) / (kTrafficPoints - 1);
       int x2 = gx + (i * (gw - 1)) / (kTrafficPoints - 1);
 
       int rxY1 = gy + gh - 1 - (int)((wanRxHistory[i - 1] / maxRxKbps) * (gh - 1));
       int rxY2 = gy + gh - 1 - (int)((wanRxHistory[i] / maxRxKbps) * (gh - 1));
-      display.drawLine(x1, rxY1, x2, rxY2, panelColor(TFT_CYAN));
+      lv_point_t rxPts[2] = {{(lv_coord_t)x1, (lv_coord_t)rxY1}, {(lv_coord_t)x2, (lv_coord_t)rxY2}};
+      lv_canvas_draw_line(canvas, rxPts, 2, &rxDsc);
 
       int txY1 = gy + gh - 1 - (int)((wanTxHistory[i - 1] / maxTxKbps) * (gh - 1));
       int txY2 = gy + gh - 1 - (int)((wanTxHistory[i] / maxTxKbps) * (gh - 1));
-      display.drawLine(x1, txY1, x2, txY2, panelColor(TFT_YELLOW));
+      lv_point_t txPts[2] = {{(lv_coord_t)x1, (lv_coord_t)txY1}, {(lv_coord_t)x2, (lv_coord_t)txY2}};
+      lv_canvas_draw_line(canvas, txPts, 2, &txDsc);
     }
+  };
 
-    display.setTextFont(1);
-    display.setTextColor(panelColor(TFT_CYAN), tft.color565(16, 16, 16));
-    display.drawString("R", gx + 2, gy + 2);
-    display.setTextColor(panelColor(TFT_YELLOW), tft.color565(16, 16, 16));
-    display.drawString("T", gx + 9, gy + 2);
-
-    display.drawRoundRect(graphX, graphY, graphW, graphH, 6, TFT_DARKGREY);
-  }
-#if defined(BOARD_PROFILE_CYD_2432S028)
-  // Footer summary for portrait layout
-  const int footerY = screenH - footerH;
-  display.fillRect(0, footerY, screenW, 18, tft.color565(24, 24, 24));
-  display.setTextColor(TFT_LIGHTGREY, tft.color565(24, 24, 24));
-  display.setTextFont(1);
-  display.drawString("Host: " + String(pfSenseHost), 6, footerY + 4);
-  if (screenW >= 260) {
-    display.drawString(WiFi.localIP().toString(), 6, footerY + 11);
-  }
-#else
-  // Footer
-  const int footerY = screenH - footerH;
-  display.fillRect(0, footerY, screenW, footerH, tft.color565(24, 24, 24));
-  display.setTextColor(TFT_LIGHTGREY, tft.color565(24, 24, 24));
-  display.setTextFont(1);
-  // First line: Host and IP
-  display.drawString("H:" + String(pfSenseHost) + "  I:" + WiFi.localIP().toString(), 6, footerY + 1);
-  // Second line: Uptime
-  display.drawString("Up:" + lastUpdate, 6, footerY + 9);
-#endif
+  drawTraffic(trafficChart, DASHBOARD_WIDTH - 20, 90);
+  drawTraffic(mainTrafficChart, 114, 76);
 }
 
-void drawDashboardMain() {
-#if defined(BOARD_PROFILE_CYD_2432S028)
-  drawDashboardOn(tft);
-#else
-  if (!sprite) {
-    return;
+void refreshLiveDataUi() {
+  bool isOnline = (wanStatus == "online" || wanStatus == "none");
+  if (pageIndex == 0) {
+    lv_label_set_text(pill, isOnline ? "ONLINE" : "OFFLINE");
+    lv_obj_set_style_bg_opa(pill, LV_OPA_COVER, 0);
+    lv_obj_set_style_pad_left(pill, 10, 0);
+    lv_obj_set_style_pad_right(pill, 10, 0);
+    lv_obj_set_style_pad_top(pill, 4, 0);
+    lv_obj_set_style_pad_bottom(pill, 4, 0);
+  } else {
+    lv_label_set_text(pill, isOnline ? LV_SYMBOL_OK : LV_SYMBOL_CLOSE);
+    lv_obj_set_style_bg_opa(pill, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_pad_left(pill, 0, 0);
+    lv_obj_set_style_pad_right(pill, 0, 0);
+    lv_obj_set_style_pad_top(pill, 0, 0);
+    lv_obj_set_style_pad_bottom(pill, 0, 0);
   }
-  sprite->fillSprite(TFT_BLACK);
-  drawDashboardOn(*sprite);
-  sprite->pushSprite(0, 0);
-#endif
+  lv_obj_set_style_bg_color(pill, isOnline ? lv_color_hex(0x174E2E) : lv_color_hex(0x5A1E1E), 0);
+  lv_obj_set_style_text_color(pill, isOnline ? lv_color_hex(0x83F7AF) : lv_color_hex(0xFFB3B3), 0);
+
+  if (mainStatusVal) {
+    lv_label_set_text(mainStatusVal, isOnline ? "Online" : "Offline");
+    lv_obj_set_style_text_color(mainStatusVal, isOnline ? lv_color_hex(0x83F7AF) : lv_color_hex(0xFFB3B3), 0);
+  }
+  if (mainStatusCard) {
+    lv_obj_set_style_bg_color(mainStatusCard, isOnline ? lv_color_hex(0x174E2E) : lv_color_hex(0x5A1E1E), 0);
+    lv_obj_set_style_border_color(mainStatusCard, isOnline ? lv_color_hex(0x2A9D63) : lv_color_hex(0xC85B5B), 0);
+  }
+
+  lv_bar_set_value(cpuBar, cpuPercent, LV_ANIM_OFF);
+  lv_bar_set_value(ramBar, memPercent, LV_ANIM_OFF);
+  lv_bar_set_value(tempBar, tempPercent, LV_ANIM_OFF);
+  lv_label_set_text_fmt(cpuVal, "%d%%", cpuPercent);
+  lv_label_set_text_fmt(ramVal, "%d%%", memPercent);
+  lv_label_set_text(tempVal, tempValue.c_str());
+
+  refreshChartData();
+  lv_label_set_text_fmt(chartRxVal, "RX %.1f kbps", wanRxHistory[kTrafficPoints - 1]);
+  lv_label_set_text_fmt(chartTxVal, "TX %.1f kbps", wanTxHistory[kTrafficPoints - 1]);
+  if (mainChartRxVal) {
+    lv_label_set_text_fmt(mainChartRxVal, "R %.1f", wanRxHistory[kTrafficPoints - 1]);
+  }
+  if (mainChartTxVal) {
+    lv_label_set_text_fmt(mainChartTxVal, "T %.1f", wanTxHistory[kTrafficPoints - 1]);
+  }
+
+  if (rttVal) lv_label_set_text(rttVal, wanDelay.c_str());
+  if (rttSdVal) lv_label_set_text(rttSdVal, wanRttSd.c_str());
+  if (lossVal) lv_label_set_text(lossVal, wanLoss.c_str());
+  if (uptimeVal) lv_label_set_text(uptimeVal, lastUpdate.c_str());
+  if (hostVal) lv_label_set_text(hostVal, pfSenseHost);
+
+  if (mainRttVal) {
+    lv_label_set_text(mainRttVal, wanDelay.c_str());
+  }
+  if (mainRttSdVal) {
+    lv_label_set_text(mainRttSdVal, wanRttSd.c_str());
+  }
+  bool hasRttSd = (wanRttSd != "-");
+  if (mainRttSdLabel) {
+    if (hasRttSd) {
+      lv_obj_clear_flag(mainRttSdLabel, LV_OBJ_FLAG_HIDDEN);
+    } else {
+      lv_obj_add_flag(mainRttSdLabel, LV_OBJ_FLAG_HIDDEN);
+    }
+  }
+  if (mainRttSdVal) {
+    if (hasRttSd) {
+      lv_obj_clear_flag(mainRttSdVal, LV_OBJ_FLAG_HIDDEN);
+    } else {
+      lv_obj_add_flag(mainRttSdVal, LV_OBJ_FLAG_HIDDEN);
+    }
+  }
+  if (mainLossVal) {
+    lv_label_set_text(mainLossVal, wanLoss.c_str());
+  }
+  if (mainHostVal) {
+    lv_label_set_text_fmt(mainHostVal, "Host: %s", pfSenseHost);
+  }
+  if (mainIpVal) {
+    lv_label_set_text_fmt(mainIpVal, "IP: %s", WiFi.localIP().toString().c_str());
+  }
+
+  if (bigCpuVal) {
+    lv_label_set_text_fmt(bigCpuVal, "%d%%", cpuPercent);
+  }
+  if (bigCpuBar) {
+    lv_bar_set_value(bigCpuBar, cpuPercent, LV_ANIM_OFF);
+  }
+  if (bigRamVal) {
+    lv_label_set_text_fmt(bigRamVal, "%d%%", memPercent);
+  }
+  if (bigRamBar) {
+    lv_bar_set_value(bigRamBar, memPercent, LV_ANIM_OFF);
+  }
+  if (bigTempVal) {
+    lv_label_set_text(bigTempVal, tempValue.c_str());
+  }
+  if (bigTempBar) {
+    lv_bar_set_value(bigTempBar, tempPercent, LV_ANIM_OFF);
+  }
+  if (bigRttVal) {
+    lv_label_set_text(bigRttVal, wanDelay.c_str());
+  }
+  if (bigRttSdVal) {
+    lv_label_set_text(bigRttSdVal, wanRttSd.c_str());
+  }
+  if (bigLossVal) {
+    lv_label_set_text(bigLossVal, wanLoss.c_str());
+  }
+
+  // Update WiFi icon color based on connection state
+  bool wifiConnectedNow = (WiFi.status() == WL_CONNECTED);
+  if (wifiIcon) {
+    lv_obj_set_style_text_color(wifiIcon,
+      wifiConnectedNow ? lv_color_hex(0x83F7AF) : lv_color_hex(0xFF6B6B), 0);
+  }
+  // Update global footer
+  if (footerHostVal) {
+    lv_label_set_text_fmt(footerHostVal, "Host: %s", pfSenseHost);
+  }
+  if (footerIpVal) {
+    lv_label_set_text_fmt(footerIpVal, "IP: %s", WiFi.localIP().toString().c_str());
+  }
+  // Update ESP & WiFi info screen (screen 4)
+  if (espInfoSsid)   lv_label_set_text_fmt(espInfoSsid,   "%s", WiFi.SSID().c_str());
+  if (espInfoIp)     lv_label_set_text_fmt(espInfoIp,     "%s", WiFi.localIP().toString().c_str());
+  if (espInfoMac)    lv_label_set_text_fmt(espInfoMac,    "%s", WiFi.macAddress().c_str());
+  if (espInfoRssi)   lv_label_set_text_fmt(espInfoRssi,   "%d dBm", (int)WiFi.RSSI());
+  if (espInfoGw)     lv_label_set_text_fmt(espInfoGw,     "%s", WiFi.gatewayIP().toString().c_str());
+  if (espInfoSubnet) lv_label_set_text_fmt(espInfoSubnet, "%s", WiFi.subnetMask().toString().c_str());
+  if (espInfoHeap)   lv_label_set_text_fmt(espInfoHeap,   "%lu B", (unsigned long)ESP.getFreeHeap());
+  if (espInfoUptime) lv_label_set_text_fmt(espInfoUptime, "%s", lastUpdate.c_str());
 }
 
-void drawDashboard() {
-  drawDashboardMain();
+void createUi() {
+  lv_obj_t *screen = lv_scr_act();
+  lv_obj_set_style_bg_color(screen, lv_color_hex(0x101318), 0);
+
+  lv_obj_t *header = lv_obj_create(screen);
+  lv_obj_remove_style_all(header);
+  lv_obj_set_size(header, DASHBOARD_WIDTH, 28);
+  lv_obj_align(header, LV_ALIGN_TOP_LEFT, 0, 0);
+  lv_obj_set_style_bg_color(header, lv_color_hex(0x1F2328), 0);
+  lv_obj_set_style_bg_opa(header, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_width(header, 0, 0);
+
+  lv_obj_t *title = lv_label_create(screen);
+  lv_label_set_text(title, "pfSense Firewall Status");
+  lv_obj_set_style_text_color(title, lv_color_hex(0xDDE7F2), 0);
+  lv_obj_set_style_text_font(title, &lv_font_montserrat_14, 0);
+  lv_obj_align(title, LV_ALIGN_TOP_LEFT, 10, 8);
+
+  pill = lv_label_create(screen);
+  lv_label_set_text(pill, "ONLINE");
+  lv_obj_set_style_bg_color(pill, lv_color_hex(0x174E2E), 0);
+  lv_obj_set_style_bg_opa(pill, LV_OPA_COVER, 0);
+  lv_obj_set_style_text_color(pill, lv_color_hex(0x83F7AF), 0);
+  lv_obj_set_style_pad_left(pill, 10, 0);
+  lv_obj_set_style_pad_right(pill, 10, 0);
+  lv_obj_set_style_pad_top(pill, 4, 0);
+  lv_obj_set_style_pad_bottom(pill, 4, 0);
+  lv_obj_set_style_radius(pill, 10, 0);
+  lv_obj_align(pill, LV_ALIGN_TOP_RIGHT, -10, 7);
+
+  wifiIcon = lv_label_create(screen);
+  lv_label_set_text(wifiIcon, LV_SYMBOL_WIFI);
+  lv_obj_set_style_text_color(wifiIcon, lv_color_hex(0x83F7AF), 0);
+  lv_obj_set_style_text_font(wifiIcon, &lv_font_montserrat_14, 0);
+  lv_obj_align(wifiIcon, LV_ALIGN_TOP_RIGHT, -90, 8);
+
+  for (int i = 0; i < 3; ++i) {
+    pages[i] = lv_obj_create(screen);
+    lv_obj_remove_style_all(pages[i]);
+    lv_obj_set_size(pages[i], DASHBOARD_WIDTH, DASHBOARD_HEIGHT - 28);
+    lv_obj_align(pages[i], LV_ALIGN_TOP_LEFT, 0, 28);
+    lv_obj_set_style_bg_opa(pages[i], LV_OPA_TRANSP, 0);
+  }
+
+  createScreenDashboard(pages[0], refs, kTrafficPoints);
+  createScreenGraph(pages[1], refs, kTrafficPoints);
+  createScreenMetrics(pages[2], refs);
+
+  // Global footer on all screens
+  lv_obj_t *footer = lv_obj_create(screen);
+  lv_obj_remove_style_all(footer);
+  lv_obj_set_size(footer, DASHBOARD_WIDTH, 16);
+  lv_obj_align(footer, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+  lv_obj_set_style_bg_color(footer, lv_color_hex(0x1F2328), 0);
+  lv_obj_set_style_bg_opa(footer, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_width(footer, 0, 0);
+
+  footerHostVal = lvglCreateValueLabel(footer, "Host: -", 6, 2, lv_color_hex(0x8E9BAC));
+  footerIpVal   = lvglCreateValueLabel(footer, "IP: -",   168, 2, lv_color_hex(0x8E9BAC));
+
+  setPage(0);
+  refreshLiveDataUi();
+}
+}  // namespace
+
+void initDashboard() {
+  lv_init();
+
+  lv_disp_draw_buf_init(&dispDrawBuf, drawBuf, nullptr, DASHBOARD_WIDTH * kBufferLines);
+
+  lv_disp_drv_init(&dispDrv);
+  dispDrv.hor_res = DASHBOARD_WIDTH;
+  dispDrv.ver_res = DASHBOARD_HEIGHT;
+  dispDrv.flush_cb = flushCallback;
+  dispDrv.draw_buf = &dispDrawBuf;
+  lv_disp_drv_register(&dispDrv);
+
+#if defined(BOARD_PROFILE_LILYGO_T_DISPLAY_S3)
+  pinMode(0, INPUT_PULLUP);
+  pinMode(14, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(14), onUpperButtonChange, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(0), onLowerButtonChange, CHANGE);
+#endif
+
+  createUi();
+  applyBrightness();
+  lastUpperState = digitalRead(14);
+  lastLowerState = digitalRead(0);
+  lastUiRefreshMs = millis();
+  lastTickMs = millis();
+
+  xApiMutex = xSemaphoreCreateMutex();
+
+  xTaskCreatePinnedToCore(
+    [](void *) {
+      const TickType_t xInterval = pdMS_TO_TICKS(kPollMs);
+      TickType_t xLastWake = xTaskGetTickCount();
+      for (;;) {
+        vTaskDelayUntil(&xLastWake, xInterval);
+        if (WiFi.status() != WL_CONNECTED) continue;
+        if (xSemaphoreTake(xApiMutex, pdMS_TO_TICKS(2000)) == pdTRUE) {
+          fetchGatewayStatus();
+          fetchWanTraffic();
+          fetchSystemStatus();
+          xSemaphoreGive(xApiMutex);
+          apiDataReady = true;
+        }
+      }
+    },
+    "apiPoll", 8192, nullptr, 1, nullptr, 0
+  );
+}
+
+void loopDashboard() {
+  uint32_t now = millis();
+  uint32_t elapsed = now - lastTickMs;
+  lastTickMs = now;
+
+  markBootDashboardReady();
+  dismissBootScreenIfConnected();
+
+  wm.process();
+  if (wm.server) {
+    wm.server->handleClient();
+  }
+
+  if (shouldSaveConfig) {
+    shouldSaveConfig = false;
+    handleConfigSavedTransition();
+  }
+
+  bool upperState = digitalRead(14);
+  bool lowerState = digitalRead(0);
+
+  while (upperPressCount > 0) {
+    upperPressCount--;
+    if ((now - upperLastTransitionMs) < kButtonTransitionDebounceMs) {
+      continue;
+    }
+    upperLastTransitionMs = now;
+    upperPressStart = now;
+    upperIsDown = true;
+    upperLongPressHandled = false;
+  }
+  while (upperReleaseCount > 0) {
+    upperReleaseCount--;
+    if ((now - upperLastTransitionMs) < kButtonTransitionDebounceMs) {
+      continue;
+    }
+    upperLastTransitionMs = now;
+    if (upperIsDown && !upperLongPressHandled && (now - upperPressStart) < kLongPressMs && (now - lastUpperActionMs) >= kButtonDebounceMsLocal) {
+      setPage((pageIndex + 1) % 3);
+      lastUpperActionMs = now;
+    }
+    upperIsDown = false;
+    upperLongPressHandled = false;
+  }
+
+  while (lowerPressCount > 0) {
+    lowerPressCount--;
+    if ((now - lowerLastTransitionMs) < kButtonTransitionDebounceMs) {
+      continue;
+    }
+    lowerLastTransitionMs = now;
+    lowerPressStart = now;
+    lowerIsDown = true;
+    lowerLongPressHandled = false;
+  }
+  while (lowerReleaseCount > 0) {
+    lowerReleaseCount--;
+    if ((now - lowerLastTransitionMs) < kButtonTransitionDebounceMs) {
+      continue;
+    }
+    lowerLastTransitionMs = now;
+    if (lowerIsDown && !lowerLongPressHandled && (now - lowerPressStart) < kLongPressMs && (now - lastLowerActionMs) >= kButtonDebounceMsLocal) {
+      cycleBrightness();
+      lastLowerActionMs = now;
+    }
+    lowerIsDown = false;
+    lowerLongPressHandled = false;
+  }
+
+  if (upperIsDown && !upperLongPressHandled && (now - upperPressStart) >= kLongPressMs) {
+    upperLongPressHandled = true;
+  }
+  if (lowerIsDown && !lowerLongPressHandled && (now - lowerPressStart) >= kLongPressMs) {
+    lowerLongPressHandled = true;
+  }
+
+  lastUpperState = upperState;
+  lastLowerState = lowerState;
+
+  bool wifiConnected = (WiFi.status() == WL_CONNECTED);
+  if (!wifiConnected) {
+    if (now - lastWifiRetry >= kWifiRetryMsLocal) {
+      lastWifiRetry = now;
+      WiFi.reconnect();
+    }
+    wanStatus = "offline";
+  }
+
+  if (apiDataReady) {
+    apiDataReady = false;
+    lastUpdate = formatUptimeLocal(now / 1000);
+  }
+
+  if ((now - lastUiRefreshMs) >= kUiRefreshMs) {
+    lastUiRefreshMs = now;
+    if (xSemaphoreTake(xApiMutex, 0) == pdTRUE) {
+      refreshLiveDataUi();
+      xSemaphoreGive(xApiMutex);
+    } else {
+      refreshLiveDataUi(); // stale data fine while API runs
+    }
+  }
+
+  lv_tick_inc(elapsed);
+  lv_timer_handler();
+  delay(5);
 }
