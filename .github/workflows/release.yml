@@ -25,6 +25,15 @@ jobs:
       - name: Install PlatformIO
         run: python -m pip install --upgrade pip platformio
 
+      - name: Preinstall project dependencies
+        run: pio pkg install -e lilygo-t-display-s3
+
+      - name: Apply patched WiFiManager files
+        run: |
+          cp third_party/wifimanager-patched/WiFiManager.h .pio/libdeps/lilygo-t-display-s3/WiFiManager/WiFiManager.h
+          cp third_party/wifimanager-patched/WiFiManager.cpp .pio/libdeps/lilygo-t-display-s3/WiFiManager/WiFiManager.cpp
+          cp third_party/wifimanager-patched/wm_strings_en.h .pio/libdeps/lilygo-t-display-s3/WiFiManager/wm_strings_en.h
+
       - name: Generate build version header
         shell: bash
         run: |
