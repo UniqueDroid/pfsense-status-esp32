@@ -39,6 +39,8 @@ static const uint8_t brightnessLevels[] = {40, 96, 160, 255};
 static lv_obj_t *pill = nullptr;
 static lv_obj_t *wifiIcon = nullptr;
 static lv_obj_t *updateIcon = nullptr;
+static lv_obj_t *wifiSignalCanvas = nullptr;
+static lv_color_t wifiSignalCanvasBuf[15 * 14];
 static lv_obj_t *pages[3] = {nullptr, nullptr, nullptr};
 static LvglScreenRefs refs;
 
@@ -206,6 +208,47 @@ void refreshUpdateBadge() {
     lv_obj_move_foreground(updateIcon);
   } else {
     lv_obj_add_flag(updateIcon, LV_OBJ_FLAG_HIDDEN);
+  }
+}
+
+// Draw a 4-bar signal-strength icon onto wifiSignalCanvas.
+// 0 activeBars = no signal; 4 = full signal.
+void refreshWifiSignalIcon() {
+  if (!wifiSignalCanvas) return;
+
+  bool connected = (WiFi.status() == WL_CONNECTED);
+  int  rssi      = connected ? (int)WiFi.RSSI() : -100;
+
+  int activeBars = 0;
+  if (connected) {
+    if      (rssi >= -55) activeBars = 4;
+    else if (rssi >= -67) activeBars = 3;
+    else if (rssi >= -75) activeBars = 2;
+    else if (rssi >= -82) activeBars = 1;
+  }
+
+  // Fill with header background so the icon blends seamlessly.
+  lv_canvas_fill_bg(wifiSignalCanvas, lv_color_hex(0x1F2328), LV_OPA_COVER);
+
+  lv_color_t activeColor   = connected ? lv_color_hex(0x83F7AF) : lv_color_hex(0xFF6B6B);
+  lv_color_t inactiveColor = lv_color_hex(0x35404C);
+
+  // 4 bars: width 3px, 1px gap between, increasing heights (canvas is 15x14).
+  const int canvasH  = 14;
+  const int barW     = 3;
+  const int barH[4]  = {4, 7, 10, 13};
+
+  lv_draw_rect_dsc_t rdsc;
+  lv_draw_rect_dsc_init(&rdsc);
+  rdsc.radius       = 1;
+  rdsc.border_width = 0;
+
+  for (int i = 0; i < 4; ++i) {
+    rdsc.bg_color = (i < activeBars) ? activeColor : inactiveColor;
+    rdsc.bg_opa   = (i < activeBars) ? LV_OPA_COVER : LV_OPA_40;
+    lv_coord_t x  = i * (barW + 1);
+    lv_coord_t y  = canvasH - barH[i];
+    lv_canvas_draw_rect(wifiSignalCanvas, x, y, barW, barH[i], &rdsc);
   }
 }
 
@@ -379,6 +422,7 @@ void refreshLiveDataUi() {
     lv_obj_set_style_text_color(wifiIcon,
       wifiConnectedNow ? lv_color_hex(0x83F7AF) : lv_color_hex(0xFF6B6B), 0);
   }
+  refreshWifiSignalIcon();
   if (updateIcon) {
     lv_obj_set_style_text_color(updateIcon,
       firmwareUpdateAvailable ? lv_color_hex(0xF5B942) : lv_color_hex(0x8E9BAC), 0);
@@ -437,6 +481,10 @@ void createUi() {
   lv_obj_set_style_text_font(wifiIcon, &lv_font_montserrat_14, 0);
   lv_obj_align(wifiIcon, LV_ALIGN_TOP_RIGHT, -90, 8);
 
+  wifiSignalCanvas = lv_canvas_create(screen);
+  lv_canvas_set_buffer(wifiSignalCanvas, wifiSignalCanvasBuf, 15, 14, LV_IMG_CF_TRUE_COLOR);
+  lv_obj_align(wifiSignalCanvas, LV_ALIGN_TOP_RIGHT, -56, 7);
+
   updateIcon = lv_label_create(screen);
   lv_label_set_text(updateIcon, LV_SYMBOL_DOWNLOAD);
   lv_obj_set_style_text_font(updateIcon, &lv_font_montserrat_14, 0);
@@ -469,6 +517,7 @@ void createUi() {
 
   setPage(0);
   refreshLiveDataUi();
+  refreshWifiSignalIcon();
   refreshUpdateBadge();
 }
 }  // namespace
