@@ -37,7 +37,6 @@ static uint8_t brightnessIndex = 3;
 static const uint8_t brightnessLevels[] = {40, 96, 160, 255};
 
 static lv_obj_t *pill = nullptr;
-static lv_obj_t *wifiIcon = nullptr;
 static lv_obj_t *updateIcon = nullptr;
 static lv_obj_t *wifiSignalCanvas = nullptr;
 static lv_color_t wifiSignalCanvasBuf[15 * 14];
@@ -176,12 +175,12 @@ void setPage(uint8_t index) {
       lv_obj_add_flag(pages[i], LV_OBJ_FLAG_HIDDEN);
     }
   }
-  // Page 0 has its own status card; hide global pill, shift WiFi icon to far right.
+  // Page 0 has its own status card; hide global pill, shift WiFi bars to far right.
   if (pageIndex == 0) {
     lv_obj_add_flag(pill, LV_OBJ_FLAG_HIDDEN);
     if (mainHostVal) lv_obj_add_flag(mainHostVal, LV_OBJ_FLAG_HIDDEN);
     if (mainIpVal) lv_obj_add_flag(mainIpVal, LV_OBJ_FLAG_HIDDEN);
-    if (wifiIcon) lv_obj_align(wifiIcon, LV_ALIGN_TOP_RIGHT, -10, 8);
+    if (wifiSignalCanvas) lv_obj_align(wifiSignalCanvas, LV_ALIGN_TOP_RIGHT, -10, 7);
   } else {
     lv_obj_clear_flag(pill, LV_OBJ_FLAG_HIDDEN);
     lv_label_set_text(pill, LV_SYMBOL_OK);
@@ -194,7 +193,7 @@ void setPage(uint8_t index) {
     lv_obj_align(pill, LV_ALIGN_TOP_RIGHT, -30, 7);
     if (mainHostVal) lv_obj_clear_flag(mainHostVal, LV_OBJ_FLAG_HIDDEN);
     if (mainIpVal) lv_obj_clear_flag(mainIpVal, LV_OBJ_FLAG_HIDDEN);
-    if (wifiIcon) lv_obj_align(wifiIcon, LV_ALIGN_TOP_RIGHT, -10, 8);
+    if (wifiSignalCanvas) lv_obj_align(wifiSignalCanvas, LV_ALIGN_TOP_RIGHT, -10, 7);
   }
 }
 
@@ -230,7 +229,7 @@ void refreshWifiSignalIcon() {
   // Fill with header background so the icon blends seamlessly.
   lv_canvas_fill_bg(wifiSignalCanvas, lv_color_hex(0x1F2328), LV_OPA_COVER);
 
-  lv_color_t activeColor   = connected ? lv_color_hex(0x83F7AF) : lv_color_hex(0xFF6B6B);
+  lv_color_t activeColor   = connected ? lv_color_hex(0x83F7AF) : lv_color_hex(0x6B6BFF);
   lv_color_t inactiveColor = lv_color_hex(0x35404C);
 
   // 4 bars: width 3px, 1px gap between, increasing heights (canvas is 15x14).
@@ -322,16 +321,16 @@ void refreshLiveDataUi() {
     lv_obj_set_style_pad_top(pill, 0, 0);
     lv_obj_set_style_pad_bottom(pill, 0, 0);
   }
-  lv_obj_set_style_bg_color(pill, isOnline ? lv_color_hex(0x174E2E) : lv_color_hex(0x5A1E1E), 0);
-  lv_obj_set_style_text_color(pill, isOnline ? lv_color_hex(0x83F7AF) : lv_color_hex(0xFFB3B3), 0);
+  lv_obj_set_style_bg_color(pill, isOnline ? lv_color_hex(0x174E2E) : lv_color_hex(0x1E1E5A), 0);
+  lv_obj_set_style_text_color(pill, isOnline ? lv_color_hex(0x83F7AF) : lv_color_hex(0xB3B3FF), 0);
 
   if (mainStatusVal) {
     lv_label_set_text(mainStatusVal, isOnline ? "Online" : "Offline");
-    lv_obj_set_style_text_color(mainStatusVal, isOnline ? lv_color_hex(0x83F7AF) : lv_color_hex(0xFFB3B3), 0);
+    lv_obj_set_style_text_color(mainStatusVal, isOnline ? lv_color_hex(0x83F7AF) : lv_color_hex(0xB3B3FF), 0);
   }
   if (mainStatusCard) {
-    lv_obj_set_style_bg_color(mainStatusCard, isOnline ? lv_color_hex(0x174E2E) : lv_color_hex(0x5A1E1E), 0);
-    lv_obj_set_style_border_color(mainStatusCard, isOnline ? lv_color_hex(0x2A9D63) : lv_color_hex(0xC85B5B), 0);
+    lv_obj_set_style_bg_color(mainStatusCard, isOnline ? lv_color_hex(0x174E2E) : lv_color_hex(0x1E1E5A), 0);
+    lv_obj_set_style_border_color(mainStatusCard, isOnline ? lv_color_hex(0x2A9D63) : lv_color_hex(0x5B5BC8), 0);
   }
 
   lv_bar_set_value(cpuBar, cpuPercent, LV_ANIM_OFF);
@@ -416,12 +415,7 @@ void refreshLiveDataUi() {
     lv_label_set_text(bigLossVal, wanLoss.c_str());
   }
 
-  // Update WiFi icon color based on connection state
-  bool wifiConnectedNow = (WiFi.status() == WL_CONNECTED);
-  if (wifiIcon) {
-    lv_obj_set_style_text_color(wifiIcon,
-      wifiConnectedNow ? lv_color_hex(0x83F7AF) : lv_color_hex(0xFF6B6B), 0);
-  }
+  // Update WiFi signal bars based on connection state
   refreshWifiSignalIcon();
   if (updateIcon) {
     lv_obj_set_style_text_color(updateIcon,
@@ -475,15 +469,9 @@ void createUi() {
   lv_obj_set_style_radius(pill, 10, 0);
   lv_obj_align(pill, LV_ALIGN_TOP_RIGHT, -10, 7);
 
-  wifiIcon = lv_label_create(screen);
-  lv_label_set_text(wifiIcon, LV_SYMBOL_WIFI);
-  lv_obj_set_style_text_color(wifiIcon, lv_color_hex(0x83F7AF), 0);
-  lv_obj_set_style_text_font(wifiIcon, &lv_font_montserrat_14, 0);
-  lv_obj_align(wifiIcon, LV_ALIGN_TOP_RIGHT, -90, 8);
-
   wifiSignalCanvas = lv_canvas_create(screen);
   lv_canvas_set_buffer(wifiSignalCanvas, wifiSignalCanvasBuf, 15, 14, LV_IMG_CF_TRUE_COLOR);
-  lv_obj_align(wifiSignalCanvas, LV_ALIGN_TOP_RIGHT, -56, 7);
+  lv_obj_align(wifiSignalCanvas, LV_ALIGN_TOP_RIGHT, -88, 7);
 
   updateIcon = lv_label_create(screen);
   lv_label_set_text(updateIcon, LV_SYMBOL_DOWNLOAD);

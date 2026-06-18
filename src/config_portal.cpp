@@ -490,7 +490,7 @@ void drawBootScreen() {
     lv_label_set_text(hint, "Open portal for setup:");
     lv_obj_set_style_text_font(hint, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(hint, lv_color_hex(0xAAB6C4), 0);
-    lv_obj_align(hint, LV_ALIGN_TOP_LEFT, 14, 126);
+    lv_obj_align(hint, LV_ALIGN_TOP_LEFT, 14, 110);
 
     lv_obj_t *ap = lv_label_create(bootOverlay);
     lv_label_set_text_fmt(ap, "AP: %s", kApName);
