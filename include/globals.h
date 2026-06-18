@@ -50,3 +50,6 @@ extern uint32_t lastPoll;
 extern const uint32_t kPollMs;
 extern const char *kApName;
 extern const char *kApPassword;
+
+// Firmware update notification state
+extern bool firmwareUpdateAvailable;

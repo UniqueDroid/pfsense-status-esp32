@@ -8,6 +8,7 @@
 #include "config_portal.h"
 #include "globals.h"
 #include "lvgl_screens.h"
+#include "firmware_update.h"
 #include "pfsense_api.h"
 
 namespace {
@@ -37,6 +38,7 @@ static const uint8_t brightnessLevels[] = {40, 96, 160, 255};
 
 static lv_obj_t *pill = nullptr;
 static lv_obj_t *wifiIcon = nullptr;
+static lv_obj_t *updateIcon = nullptr;
 static lv_obj_t *pages[3] = {nullptr, nullptr, nullptr};
 static LvglScreenRefs refs;
 
@@ -191,6 +193,19 @@ void setPage(uint8_t index) {
     if (mainHostVal) lv_obj_clear_flag(mainHostVal, LV_OBJ_FLAG_HIDDEN);
     if (mainIpVal) lv_obj_clear_flag(mainIpVal, LV_OBJ_FLAG_HIDDEN);
     if (wifiIcon) lv_obj_align(wifiIcon, LV_ALIGN_TOP_RIGHT, -10, 8);
+  }
+}
+
+void refreshUpdateBadge() {
+  if (!updateIcon) {
+    return;
+  }
+
+  if (firmwareUpdateAvailable) {
+    lv_obj_clear_flag(updateIcon, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(updateIcon);
+  } else {
+    lv_obj_add_flag(updateIcon, LV_OBJ_FLAG_HIDDEN);
   }
 }
 
@@ -364,6 +379,10 @@ void refreshLiveDataUi() {
     lv_obj_set_style_text_color(wifiIcon,
       wifiConnectedNow ? lv_color_hex(0x83F7AF) : lv_color_hex(0xFF6B6B), 0);
   }
+  if (updateIcon) {
+    lv_obj_set_style_text_color(updateIcon,
+      firmwareUpdateAvailable ? lv_color_hex(0xF5B942) : lv_color_hex(0x8E9BAC), 0);
+  }
   // Update global footer
   if (footerHostVal) {
     lv_label_set_text_fmt(footerHostVal, "Host: %s", pfSenseHost);
@@ -418,6 +437,12 @@ void createUi() {
   lv_obj_set_style_text_font(wifiIcon, &lv_font_montserrat_14, 0);
   lv_obj_align(wifiIcon, LV_ALIGN_TOP_RIGHT, -90, 8);
 
+  updateIcon = lv_label_create(screen);
+  lv_label_set_text(updateIcon, LV_SYMBOL_DOWNLOAD);
+  lv_obj_set_style_text_font(updateIcon, &lv_font_montserrat_14, 0);
+  lv_obj_align(updateIcon, LV_ALIGN_TOP_RIGHT, -64, 8);
+  lv_obj_add_flag(updateIcon, LV_OBJ_FLAG_HIDDEN);
+
   for (int i = 0; i < 3; ++i) {
     pages[i] = lv_obj_create(screen);
     lv_obj_remove_style_all(pages[i]);
@@ -444,6 +469,7 @@ void createUi() {
 
   setPage(0);
   refreshLiveDataUi();
+  refreshUpdateBadge();
 }
 }  // namespace
 
@@ -479,6 +505,7 @@ void initDashboard() {
     [](void *) {
       const TickType_t xInterval = pdMS_TO_TICKS(kPollMs);
       TickType_t xLastWake = xTaskGetTickCount();
+      uint32_t lastReleaseCheckMs = 0;
       for (;;) {
         vTaskDelayUntil(&xLastWake, xInterval);
         if (WiFi.status() != WL_CONNECTED) continue;
@@ -486,6 +513,14 @@ void initDashboard() {
           fetchGatewayStatus();
           fetchWanTraffic();
           fetchSystemStatus();
+          if ((millis() - lastReleaseCheckMs) >= 15UL * 60UL * 1000UL) {
+            FirmwareReleaseInfo releaseInfo;
+            String errorMessage;
+            if (fetchLatestFirmwareRelease(releaseInfo, errorMessage)) {
+              firmwareUpdateAvailable = releaseInfo.updateAvailable;
+            }
+            lastReleaseCheckMs = millis();
+          }
           xSemaphoreGive(xApiMutex);
           apiDataReady = true;
         }
@@ -597,9 +632,11 @@ void loopDashboard() {
     // Prefer mutex-protected snapshot; fallback keeps UI responsive during API polling.
     if (xSemaphoreTake(xApiMutex, 0) == pdTRUE) {
       refreshLiveDataUi();
+      refreshUpdateBadge();
       xSemaphoreGive(xApiMutex);
     } else {
       refreshLiveDataUi(); // stale data fine while API runs
+      refreshUpdateBadge();
     }
   }
 

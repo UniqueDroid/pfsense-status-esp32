@@ -75,6 +75,9 @@ const uint8_t kBrightnessLevels[] = {40, 96, 160, 255};
 const uint8_t kBrightnessLevelCount = sizeof(kBrightnessLevels) / sizeof(kBrightnessLevels[0]);
 uint8_t brightnessLevelIndex = kBrightnessLevelCount - 1;
 
+// Dashboard uses this to show a small notification badge near the WiFi icon.
+bool firmwareUpdateAvailable = false;
+
 void applyBacklightLevel() {
 #if defined(BOARD_PROFILE_LILYGO_T_DISPLAY_S3) && defined(TFT_BL)
   analogWrite(TFT_BL, kBrightnessLevels[brightnessLevelIndex]);
