@@ -57,9 +57,12 @@ void createScreenDashboard(lv_obj_t *page, LvglScreenRefs &refs, int trafficPoin
   refs.mainLossVal = lvglCreateValueLabel(page, "-", 50, 107, lv_color_hex(0xF5B942));
 
   refs.mainStatusCard = lv_obj_create(page);
+  lv_obj_remove_style_all(refs.mainStatusCard);            // strip blue LVGL default theme
+  lv_obj_clear_flag(refs.mainStatusCard, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_set_size(refs.mainStatusCard, 114, 38);
   lv_obj_align(refs.mainStatusCard, LV_ALIGN_TOP_LEFT, 198, 2);
   lv_obj_set_style_radius(refs.mainStatusCard, 6, 0);
+  lv_obj_set_style_bg_opa(refs.mainStatusCard, LV_OPA_COVER, 0);
   lv_obj_set_style_bg_color(refs.mainStatusCard, lv_color_hex(0x174E2E), 0);
   lv_obj_set_style_border_width(refs.mainStatusCard, 2, 0);
   lv_obj_set_style_border_color(refs.mainStatusCard, lv_color_hex(0x4A545F), 0);
