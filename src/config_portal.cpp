@@ -591,7 +591,7 @@ void setupPortalRoutes() {
 
   auto eraseAllAndReboot = []() {
     BOOTLOG("[BOOT] Factory erase requested\n");
-    wm.server->send(200, "text/html", "<html><head><meta charset='utf-8'></head><body><h3>Config erased. Rebooting...</h3></body></html>");
+    wm.server->send(200, "text/html", "<html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><style>body{font-family:verdana;text-align:center;padding:18px}.wm-brand{display:flex;justify-content:center;align-items:center;min-height:64px;margin:4px 0 10px 0}.wm-brand-logo{display:block;max-width:min(100%,320px);height:auto;margin:0 auto}</style></head><body><div class='wm-brand'><img class='wm-brand-logo' src='/project-logo.png' alt='Project logo'></div><p><strong>Config erased. Rebooting...</strong></p></body></html>");
     wm.server->client().stop();
     delay(600);
     ConfigManager::getInstance().clearConfig();
@@ -680,11 +680,58 @@ void handleConfigSavedTransition() {
 void configureWiFi() {
   const char *firstRunMenu[] = {"custom"};
   const char *fullMenu[] = {"wifi", "param", "info", "custom", "restart", "sep"};
+  static const char kPortalLogoHeadElement[] = R"HTML(
+<style>
+.wm-brand{display:flex;justify-content:center;align-items:center;min-height:64px;margin:6px 0 8px 0}
+.wm-brand-logo{display:block;max-width:min(100%,320px);height:auto;margin:0 auto}
+</style>
+<script>
+(function(){
+  function ensurePortalLogo(){
+    var body=document.body;
+    if(!body||body.classList.contains('wm-logo-ready')) return;
+    body.classList.add('wm-logo-ready');
+
+    var brand=document.createElement('div');
+    brand.className='wm-brand';
+
+    var img=document.createElement('img');
+    img.className='wm-brand-logo';
+    img.alt='Project logo';
+    img.src='/project-logo.png';
+    img.onerror=function(){this.style.display='none';};
+    brand.appendChild(img);
+
+    var heading=body.querySelector('h1, h2, h3');
+    if(heading){
+      heading.style.display='none';
+      heading.parentNode.insertBefore(brand, heading);
+      return;
+    }
+
+    var wrap=body.querySelector('.wrap');
+    if(wrap){
+      wrap.insertBefore(brand, wrap.firstChild);
+      return;
+    }
+
+    body.insertBefore(brand, body.firstChild);
+  }
+
+  if(document.readyState==='loading'){
+    document.addEventListener('DOMContentLoaded', ensurePortalLogo);
+  }else{
+    ensurePortalLogo();
+  }
+})();
+</script>
+)HTML";
 
   wm.setSaveConfigCallback(saveConfigCallback);
   wm.setSaveParamsCallback(saveParamsCallback);
   wm.setConfigPortalBlocking(false);
   wm.setTitle("pfSense Firewall Status");
+  wm.setCustomHeadElement(kPortalLogoHeadElement);
   wm.setShowBack(true);
   // Keep Info page clean: only informational content, no destructive quick actions.
   wm.setShowInfoErase(false);
