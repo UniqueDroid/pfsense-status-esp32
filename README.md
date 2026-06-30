@@ -42,3 +42,4 @@ ESP32 Dashboard fuer pfSense mit konfigurierbaren Board-Profilen (z. B. LilyGO T
 ## Hinweise
 - Die HTTPS-Verbindung nutzt `setInsecure()` fuer Self-Signed Zertifikate.
 - Fuer Produktivbetrieb ist Zertifikats-Pinning sicherer.
+- Der API-Key wird ausschliesslich ueber HTTPS gesendet. Antwortet die Firewall nur per HTTP, erkennt das Geraet lediglich einen Redirect auf HTTPS, authentifiziert sich darueber aber nicht im Klartext.

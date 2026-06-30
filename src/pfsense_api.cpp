@@ -38,7 +38,10 @@ int apiGet(const char *path, String &payload) {
     return httpsCode;
   }
 
-  // Fallback for devices/networks where TLS handshake fails.
+  // HTTPS unreachable: probe plain HTTP without the API key, purely to detect
+  // a redirect to HTTPS (pfSense's webConfigurator commonly does this). The
+  // key must never go out over an unencrypted connection, so this request is
+  // unauthenticated and its body, if any, is not used as a successful result.
   WiFiClient plainClient;
   HTTPClient http;
   if (!http.begin(plainClient, httpUrl)) {
@@ -47,12 +50,8 @@ int apiGet(const char *path, String &payload) {
 
   const char *headerKeys[] = {"Location"};
   http.collectHeaders(headerKeys, 1);
-  http.addHeader("X-API-Key", apiKey);
   http.addHeader("Accept", "application/json");
   int code = http.GET();
-  if (code == HTTP_CODE_OK) {
-    payload = http.getString();
-  }
 
   String location = http.header("Location");
   http.end();

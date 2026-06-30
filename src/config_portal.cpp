@@ -88,21 +88,6 @@ void setStepText(lv_obj_t *label, const char *name, BootStepState state, const c
   lv_obj_set_style_text_color(label, color, 0);
 }
 
-bool tryApiCheckHttp(const String &url) {
-  // Lightweight probe used by boot sequence to validate host/key quickly.
-  WiFiClient client;
-  HTTPClient http;
-  if (!http.begin(client, url)) {
-    return false;
-  }
-  http.setTimeout(1500);
-  http.addHeader("X-API-Key", apiKey);
-  http.addHeader("Accept", "application/json");
-  int code = http.GET();
-  http.end();
-  return code == HTTP_CODE_OK;
-}
-
 bool tryApiCheckHttps(const String &url) {
   // TLS probe first; cert checks are intentionally relaxed for local appliances.
   WiFiClientSecure client;
@@ -127,14 +112,8 @@ bool isApiReachable() {
 
   String host = String(pfSenseHost);
   String path = "/api/v2/status/gateways";
-  // Prefer HTTPS and fallback to HTTP to tolerate mixed pfSense setups.
-  if (tryApiCheckHttps(String("https://") + host + path)) {
-    return true;
-  }
-  if (tryApiCheckHttp(String("http://") + host + path)) {
-    return true;
-  }
-  return false;
+  // The API key must never go out over plain HTTP, so only HTTPS counts as reachable.
+  return tryApiCheckHttps(String("https://") + host + path);
 }
 
 String sanitizeHost(const char *raw) {
