@@ -639,7 +639,7 @@ void setupPortalRoutes() {
       String script = "<script>setFwProgress(";
       script += percent;
       script += ",\"";
-      script += escapeJson(percent >= 100 ? String("Finishing firmware update...") : String("Downloading and flashing firmware... ") + percent + "%");
+      script += escapeJson(percent >= 100 ? String("Verifying checksum (SHA256)...") : String("Downloading and flashing firmware... ") + percent + "%");
       script += "\",false);</script>";
       wm.server->sendContent(script);
     });
@@ -653,7 +653,7 @@ void setupPortalRoutes() {
       return;
     }
 
-    wm.server->sendContent("<script>setFwProgress(100,\"Firmware updated successfully. Device is rebooting now...\",false);</script>");
+    wm.server->sendContent("<script>setFwProgress(100,\"<span style='color:#2e7d32;font-weight:700'>&#10003;</span> Checksum verified. Firmware updated successfully. Device is rebooting now...\",false);</script>");
     wm.server->sendContent("</div></body></html>");
     delay(1600);
     ESP.restart();
@@ -670,11 +670,61 @@ void handleConfigSavedTransition() {
 void configureWiFi() {
   const char *firstRunMenu[] = {"custom"};
   const char *fullMenu[] = {"wifi", "param", "info", "custom", "restart", "sep"};
+  // WiFiManager's own page template (login/root/wifi/info/param) has no logo
+  // slot of its own, unlike the custom firmware-update pages which build their
+  // header HTML from scratch. Inject it via JS so those native pages match.
+  static const char kPortalLogoHeadElement[] = R"HTML(
+<style>
+.wm-brand{display:flex;justify-content:center;align-items:center;min-height:64px;margin:6px 0 8px 0}
+.wm-brand-logo{display:block;max-width:min(100%,320px);height:auto;margin:0 auto}
+</style>
+<script>
+(function(){
+  function ensurePortalLogo(){
+    var body=document.body;
+    if(!body||body.classList.contains('wm-logo-ready')) return;
+    body.classList.add('wm-logo-ready');
+
+    var brand=document.createElement('div');
+    brand.className='wm-brand';
+
+    var img=document.createElement('img');
+    img.className='wm-brand-logo';
+    img.alt='Project logo';
+    img.src='/project-logo.png';
+    img.onerror=function(){this.style.display='none';};
+    brand.appendChild(img);
+
+    var heading=body.querySelector('h1, h2, h3');
+    if(heading){
+      heading.style.display='none';
+      heading.parentNode.insertBefore(brand, heading);
+      return;
+    }
+
+    var wrap=body.querySelector('.wrap');
+    if(wrap){
+      wrap.insertBefore(brand, wrap.firstChild);
+      return;
+    }
+
+    body.insertBefore(brand, body.firstChild);
+  }
+
+  if(document.readyState==='loading'){
+    document.addEventListener('DOMContentLoaded', ensurePortalLogo);
+  }else{
+    ensurePortalLogo();
+  }
+})();
+</script>
+)HTML";
 
   wm.setSaveConfigCallback(saveConfigCallback);
   wm.setSaveParamsCallback(saveParamsCallback);
   wm.setConfigPortalBlocking(false);
   wm.setTitle("pfSense Firewall Status");
+  wm.setCustomHeadElement(kPortalLogoHeadElement);
   wm.setShowBack(true);
   // Keep Info page clean: only informational content, no destructive quick actions.
   wm.setShowInfoErase(false);
