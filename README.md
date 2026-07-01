@@ -65,6 +65,15 @@ The device periodically checks `https://api.github.com/repos/UniqueDroid/pfsense
   2. Register it in `include/boards/board_profile.h`.
   3. Add a new environment in `platformio.ini` with the matching `BOARD_PROFILE_...` flag.
 
+## Credits
+
+This project is built on top of several open-source libraries:
+
+- **[WiFiManager](https://github.com/tzapu/WiFiManager)** by [tzapu](https://github.com/tzapu) and [tablatronix](https://github.com/tablatronix) (MIT license) - powers the entire Wi-Fi captive portal and the password-gated web menu (config, firmware update, factory erase). `third_party/wifimanager-patched/` carries one small patch on top of upstream 2.0.17: `handleRequest()` is exposed as `public` instead of `protected`, so this project's custom routes can reuse WiFiManager's own session/password check instead of bypassing it.
+- **[LVGL](https://github.com/lvgl/lvgl)** (MIT license) - renders the on-device dashboard UI.
+- **[TFT_eSPI](https://github.com/Bodmer/TFT_eSPI)** by [Bodmer](https://github.com/Bodmer) (FreeBSD license) - display driver.
+- **[ArduinoJson](https://github.com/bblanchon/ArduinoJson)** by [bblanchon](https://github.com/bblanchon) (MIT license) - parses pfSense API responses and GitHub release metadata.
+
 ## Security notes
 
 - The pfSense API key is only ever sent over HTTPS; if the firewall only answers on plain HTTP, the device treats that as unreachable rather than falling back to sending the key in the clear.
